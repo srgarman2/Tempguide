@@ -16,14 +16,14 @@ export const COOKING_METHODS = [
   {
     id: 'basting-flip',
     label: 'Basting & 30s Flip',
-    description: 'Choose this OR pan sear — not both',
+    description: 'Baste, flip, or combine both',
     icon: '🥄',
     effectiveHeatF: 450,
     carryoverCoeff: 0.22,
     appliesCarryover: true,
     usesBastingPullTemps: true, // Flag: use basting-specific pull temps from data
     compatibleCategories: ['beef'],
-    tip: 'Chris Young method: flip every 30 sec while continuously ladling hot butter (~320°F) over the steak. This is an alternative to a static pan-sear — pick one, not both. ⚠️ Carryover is extreme for small cuts: hot butter keeps cooking the steak after you pull it. Chris Young reports up to 20°F rise for thin steaks — the app adjusts pull temp based on your thickness slider.',
+    tip: 'Chris Young method: flip every 30 sec, baste with hot butter (~320°F), or both. Each technique works independently — combined they accelerate cooking and even the thermal profile. ⚠️ Carryover is extreme for small cuts: hot butter keeps cooking the steak after you pull it. Chris Young reports up to 20°F rise for thin steaks.',
   },
   {
     id: 'grill-high',
