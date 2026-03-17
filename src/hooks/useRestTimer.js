@@ -5,13 +5,15 @@ import { estimateCarryover } from '../utils/carryover';
  * Manages the rest timer and live carryover temperature tracking.
  *
  * @param {Object} params
- * @param {string}  params.methodId          - Cooking method ID
- * @param {number}  params.pullTempF         - Temperature at which protein was pulled
- * @param {number}  params.endTempF          - Target final temperature
- * @param {number}  params.restMinutes       - Recommended rest duration (minutes)
- * @param {number}  [params.thicknessInches] - Thickness for physics model
- * @param {string}  [params.categoryId]      - Protein category for physics model
- * @param {Function} [params.onComplete]     - Called when timer finishes
+ * @param {string}       params.methodId            - Cooking method ID
+ * @param {number}       params.pullTempF           - Target pull temperature (from model)
+ * @param {number}       params.endTempF            - Target final temperature
+ * @param {number}       params.restMinutes         - Recommended rest duration (minutes)
+ * @param {number}       [params.thicknessInches]   - Thickness for physics model
+ * @param {string}       [params.categoryId]        - Protein category for physics model
+ * @param {number|null}  [params.actualCoreTempF]   - Actual core temp from probe at moment of pull
+ * @param {number|null}  [params.actualSurfaceTempF] - Actual surface temp from probe at moment of pull
+ * @param {Function}     [params.onComplete]        - Called when timer finishes
  */
 export default function useRestTimer({
   methodId,
@@ -20,6 +22,8 @@ export default function useRestTimer({
   restMinutes = 10,
   thicknessInches = 1.0,
   categoryId = 'beef',
+  actualCoreTempF = null,
+  actualSurfaceTempF = null,
   onComplete,
 }) {
   const [isRunning, setIsRunning]     = useState(false);
@@ -30,21 +34,46 @@ export default function useRestTimer({
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
-  // Compute carryover with adjusted pull temp so peak aligns with endTemp.
-  // deltaF is independent of pullTempF (surfaceGradient = excess), so we derive
-  // adjusted pull = endTemp − deltaF, then recompute for correct profile.
+  // Compute carryover physics.
+  //
+  // Two paths:
+  //  A) Real probe data available (actualCoreTempF + actualSurfaceTempF):
+  //     Use actual sensor readings directly — data-driven, no adjustedPull hack needed.
+  //     The profile starts at the real core temp; real surface gradient drives deltaF.
+  //
+  //  B) No probe data (model-only):
+  //     Use the adjustedPull trick so the profile peaks at endTempF.
+  //     adjustedPull = endTempF − deltaF ensures pull + carryover = target.
   const carryover = (() => {
     if (methodId === 'sous-vide') {
       return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId });
     }
+
+    if (actualCoreTempF != null) {
+      // Path A: data-driven — actual core at pull, actual surface gradient
+      return estimateCarryover({
+        methodId,
+        pullTempF: actualCoreTempF,
+        thicknessInches,
+        restMinutes,
+        categoryId,
+        overrideSurfaceTempF: actualSurfaceTempF,
+      });
+    }
+
+    // Path B: model-driven — calibrate profile to peak at endTempF
     const { deltaF } = estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId });
     const adjustedPull = endTempF != null ? Math.round(endTempF - deltaF) : pullTempF;
     return estimateCarryover({ methodId, pullTempF: adjustedPull, thicknessInches, restMinutes, categoryId });
   })();
 
-  const adjustedPullTempF = endTempF != null && methodId !== 'sous-vide'
-    ? Math.round(endTempF - carryover.deltaF)
-    : pullTempF;
+  // The effective pull temp shown in UI:
+  // - Real data: actual core reading from probe
+  // - Model: adjusted pull derived from endTempF − deltaF
+  const adjustedPullTempF = actualCoreTempF
+    ?? (endTempF != null && methodId !== 'sous-vide'
+      ? Math.round(endTempF - carryover.deltaF)
+      : pullTempF);
 
   const totalSec = restMinutes * 60;
 
@@ -108,6 +137,44 @@ export default function useRestTimer({
   const estimatedCurrentTempF = getEstimatedTempNow();
   const hasReachedTarget = estimatedCurrentTempF >= endTempF;
 
+  // Scan profile to find when temperature first reaches endTempF
+  const timeToTargetMin = (() => {
+    const profile = carryover.restProfile;
+    if (!profile || profile.length === 0 || endTempF == null) return null;
+    for (let i = 0; i < profile.length; i++) {
+      if (profile[i].tempF >= endTempF) {
+        // Interpolate between i-1 and i for precision
+        if (i > 0) {
+          const prev = profile[i - 1];
+          const curr = profile[i];
+          const fraction = (endTempF - prev.tempF) / (curr.tempF - prev.tempF);
+          return Math.round((prev.minute + fraction * (curr.minute - prev.minute)) * 10) / 10;
+        }
+        return profile[i].minute;
+      }
+    }
+    return null; // Never reaches target within the profile window
+  })();
+
+  // Estimated remaining time to target from current elapsed position
+  const remainingToTargetSec = (() => {
+    if (timeToTargetMin == null) return null;
+    const targetSec = timeToTargetMin * 60;
+    return Math.max(0, Math.round(targetSec - elapsedSec));
+  })();
+
+  // Rate of temperature change (°F/min) over last minute of elapsed time
+  const tempSlopePerMin = (() => {
+    const profile = carryover.restProfile;
+    if (!profile || profile.length < 2) return 0;
+    const minuteNow = Math.floor(elapsedMin);
+    const minutePrev = Math.max(0, minuteNow - 1);
+    const p0 = profile[Math.min(minutePrev, profile.length - 1)];
+    const p1 = profile[Math.min(minuteNow, profile.length - 1)];
+    if (!p0 || !p1 || p0.minute === p1.minute) return 0;
+    return Math.round(((p1.tempF - p0.tempF) / (p1.minute - p0.minute)) * 10) / 10;
+  })();
+
   return {
     isRunning,
     isComplete,
@@ -120,6 +187,9 @@ export default function useRestTimer({
     adjustedPullTempF,
     estimatedCurrentTempF,
     hasReachedTarget,
+    timeToTargetMin,
+    remainingToTargetSec,
+    tempSlopePerMin,
     start,
     pause,
     resume,

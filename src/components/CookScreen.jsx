@@ -94,8 +94,56 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
   const status = getCookStatus(currentTemp, displayPullTemp, rawEndTemp);
   const shouldPull = currentTemp !== null && currentTemp >= displayPullTemp;
 
+  // ── "If pulled now" live preview ────────────────────────────────────────
+  // Recalculates carryover using current temp as the hypothetical pull temp.
+  // When probe is connected with full sensors, uses the probe-identified virtual
+  // surface sensor for an accurate gradient. Assumes room-temp ambient (72°F).
+  const pullNowPreview = (() => {
+    if (method.id === 'sous-vide' || currentTemp == null) return null;
+    // surfaceTemp is null in Instant Read mode (hook handles this)
+    const liveSurfaceTemp = isConnected ? thermo.surfaceTemp : null;
+    const preview = estimateCarryover({
+      methodId: selection.methodId,
+      pullTempF: currentTemp,
+      thicknessInches: selection.thicknessInches,
+      restMinutes: Math.max(restMinutes, 4),
+      categoryId: selection.categoryId,
+      overrideSurfaceTempF: liveSurfaceTemp,
+    });
+    const projectedPeak = Math.round((currentTemp + preview.deltaF) * 10) / 10;
+    const deltaFromTarget = rawEndTemp != null ? Math.round((projectedPeak - rawEndTemp) * 10) / 10 : null;
+    const surfaceSource = liveSurfaceTemp != null ? 'measured' : 'modeled';
+
+    // Verdict based on delta from target
+    let verdict, verdictColor, verdictIcon;
+    if (deltaFromTarget == null) {
+      verdict = 'No target set'; verdictColor = 'var(--text-tertiary)'; verdictIcon = '—';
+    } else if (deltaFromTarget > 5) {
+      verdict = `Overshoot — ${deltaFromTarget}°F past target`; verdictColor = '#ff4b4b'; verdictIcon = '⚠️';
+    } else if (deltaFromTarget >= -2) {
+      verdict = 'On target — pull now!'; verdictColor = '#4cde80'; verdictIcon = '✅';
+    } else if (deltaFromTarget >= -7) {
+      verdict = `Almost there — ${Math.abs(deltaFromTarget)}°F away`; verdictColor = '#f5a623'; verdictIcon = '⚡';
+    } else {
+      verdict = `Keep cooking — ${Math.abs(deltaFromTarget)}°F below target`; verdictColor = 'var(--text-secondary)'; verdictIcon = '⏳';
+    }
+
+    return { preview, projectedPeak, deltaFromTarget, verdict, verdictColor, verdictIcon, surfaceSource, liveSurfaceTemp };
+  })();
+
   const handlePull = () => {
-    navigate(SCREENS.REST, { thicknessInches: selection.thicknessInches });
+    // Capture live probe readings at the exact moment of pull.
+    // coreTemp and surfaceTemp use Combustion's Virtual Sensor IDs (byte 22) — not heuristics.
+    // surfaceTemp is null in Instant Read mode, making actualSurfaceTempF null naturally.
+    const hasFullSensors = isConnected && thermo.sensors?.length === 8 && !thermo.isInstantRead;
+    navigate(SCREENS.REST, {
+      thicknessInches: selection.thicknessInches,
+      actualCoreTempF:    isConnected ? thermo.coreTemp    : null,
+      actualSurfaceTempF: isConnected ? thermo.surfaceTemp : null,
+      sensorReadingsAtPull:      hasFullSensors ? [...thermo.sensors] : null,
+      virtualCoreIndexAtPull:    hasFullSensors ? thermo.virtualCoreIndex    : null,
+      virtualSurfaceIndexAtPull: hasFullSensors ? thermo.virtualSurfaceIndex : null,
+    });
   };
 
   return (
@@ -145,7 +193,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
             <span className="cook-card-title">
               {thermo.isInstantRead
                 ? 'Instant Read — T1 tip only'
-                : 'Probe Sensors (T1=tip → T8=handle)'}
+                : `Probe Sensors — core: T${thermo.virtualCoreIndex + 1}`}
             </span>
             {thermo.isInstantRead && (
               <span style={{
@@ -155,7 +203,13 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               }}>INSTANT</span>
             )}
           </div>
-          <SensorBar sensors={thermo.sensors} accentColor={category.accentColor} />
+          <SensorBar
+            sensors={thermo.sensors}
+            accentColor={category.accentColor}
+            virtualCoreIndex={thermo.virtualCoreIndex}
+            virtualSurfaceIndex={thermo.virtualSurfaceIndex}
+            virtualAmbientIndex={thermo.virtualAmbientIndex}
+          />
         </div>
       )}
 
@@ -238,6 +292,74 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           </div>
         )}
 
+        {/* If pulled now — live projection */}
+        {pullNowPreview && (
+          <div className="cook-card pull-now-card">
+            <div className="cook-card-header">
+              <span className="cook-card-title">If Pulled Now</span>
+              <span className="pull-now-verdict-badge" style={{ color: pullNowPreview.verdictColor }}>
+                {pullNowPreview.verdictIcon} {pullNowPreview.verdict}
+              </span>
+            </div>
+
+            {/* Hero: current → projected peak */}
+            <div className="pull-now-hero">
+              <div className="pull-now-hero-col">
+                <div className="pull-now-hero-label">Core now</div>
+                <div className="pull-now-hero-temp">{currentTemp?.toFixed(1)}°F</div>
+              </div>
+              <div className="pull-now-hero-arrow">+ {pullNowPreview.preview.deltaF}°F →</div>
+              <div className="pull-now-hero-col">
+                <div className="pull-now-hero-label">Projected peak</div>
+                <div className="pull-now-hero-temp" style={{ color: pullNowPreview.verdictColor }}>
+                  {pullNowPreview.projectedPeak}°F
+                </div>
+              </div>
+            </div>
+
+            {/* Detail rows */}
+            {rawEndTemp != null && (
+              <div className="carryover-row">
+                <span className="label">vs Target final</span>
+                <span className="val" style={{ color: pullNowPreview.verdictColor }}>
+                  {pullNowPreview.deltaFromTarget > 0 ? '+' : ''}{pullNowPreview.deltaFromTarget}°F ({endTempDisplay})
+                </span>
+              </div>
+            )}
+            <div className="carryover-row">
+              <span className="label">
+                Surface gradient {pullNowPreview.surfaceSource === 'measured' ? '🌡' : '(modeled)'}
+              </span>
+              <span className="val">
+                {pullNowPreview.liveSurfaceTemp != null
+                  ? `${pullNowPreview.liveSurfaceTemp.toFixed(1)}°F (probe)`
+                  : `${pullNowPreview.preview.surfaceTempAtPull}°F (est.)`
+                }
+              </span>
+            </div>
+            <div className="carryover-row">
+              <span className="label">Fourier Fo</span>
+              <span className="val">{pullNowPreview.preview.fourier}</span>
+            </div>
+            <div className="carryover-row">
+              <span className="label">Ambient assumed</span>
+              <span className="val">72°F (room temp)</span>
+            </div>
+
+            {/* Overshoot recovery tip */}
+            {pullNowPreview.deltaFromTarget > 5 && (
+              <div className="pull-now-overshoot-tip">
+                <span className="pull-now-overshoot-icon">💡</span>
+                <span>
+                  <strong>Recovery tip:</strong> Slice or carve the meat sooner than usual and skip the full rest.
+                  Cutting opens the interior and releases heat rapidly — this effectively halts carryover and
+                  prevents the center from climbing further.
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Method tip */}
         {method.tip && (
           <div className="notes-block">
@@ -311,7 +433,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
 }
 
 // ── Sensor Bar ──────────────────────────────────────────────────────────────
-function SensorBar({ sensors, accentColor }) {
+function SensorBar({ sensors, accentColor, virtualCoreIndex, virtualSurfaceIndex, virtualAmbientIndex }) {
   if (!sensors || sensors.length === 0) return null;
 
   const minTemp = Math.min(...sensors);
@@ -323,17 +445,19 @@ function SensorBar({ sensors, accentColor }) {
       <div className="sensor-bar">
         {sensors.map((temp, i) => {
           const heightPct = 20 + ((temp - minTemp) / range) * 80;
-          // Color: cold = blue-ish, hot = red/orange
           const normalized = (temp - minTemp) / range;
           const r = Math.round(60 + normalized * 180);
           const g = Math.round(120 - normalized * 80);
           const b = Math.round(200 - normalized * 180);
           const bg = `rgb(${r},${g},${b})`;
+          const isCore    = i === virtualCoreIndex;
+          const isSurface = i === virtualSurfaceIndex;
+          const isAmbient = i === virtualAmbientIndex;
 
           return (
             <div
               key={i}
-              className="sensor-pip"
+              className={`sensor-pip${isCore ? ' sensor-pip--core' : isSurface ? ' sensor-pip--surface' : ''}`}
               style={{ height: `${heightPct}%`, background: bg, minHeight: 24 }}
             >
               {Math.round(temp)}
@@ -342,9 +466,24 @@ function SensorBar({ sensors, accentColor }) {
         })}
       </div>
       <div className="sensor-label-row">
-        {sensors.map((_, i) => (
-          <span key={i}>T{i + 1}</span>
-        ))}
+        {sensors.map((_, i) => {
+          const isCore    = i === virtualCoreIndex;
+          const isSurface = i === virtualSurfaceIndex;
+          const isAmbient = i === virtualAmbientIndex;
+          return (
+            <span key={i} style={{
+              color: isCore ? '#4cde80' : isSurface ? '#f5a623' : isAmbient ? '#66bbff' : undefined,
+              fontWeight: isCore || isSurface ? 700 : 400,
+            }}>
+              {isCore ? '●' : isSurface ? '○' : ''}T{i + 1}
+            </span>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 10, color: 'rgba(240,240,240,0.35)', marginTop: 4, display: 'flex', gap: 10 }}>
+        {virtualCoreIndex != null    && <span><span style={{ color: '#4cde80' }}>●</span> core (T{virtualCoreIndex + 1})</span>}
+        {virtualSurfaceIndex != null && <span><span style={{ color: '#f5a623' }}>○</span> surface (T{virtualSurfaceIndex + 1})</span>}
+        {virtualAmbientIndex != null && <span><span style={{ color: '#66bbff' }}>· </span>ambient (T{virtualAmbientIndex + 1})</span>}
       </div>
     </>
   );

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="#0f0f0f"/>
+
+  <!-- Thermometer body (rounded rect) -->
+  <rect x="224" y="60" width="64" height="280" rx="32" fill="#1e1e1e" stroke="#333" stroke-width="2"/>
+
+  <!-- Mercury fill -->
+  <rect x="240" y="180" width="32" height="160" rx="16" fill="url(#mercuryGrad)"/>
+
+  <!-- Thermometer bulb -->
+  <circle cx="256" cy="360" r="52" fill="url(#bulbGrad)"/>
+  <circle cx="256" cy="360" r="38" fill="#ff5a2c"/>
+
+  <!-- Tick marks -->
+  <line x1="288" y1="120" x2="308" y2="120" stroke="#555" stroke-width="3" stroke-linecap="round"/>
+  <line x1="288" y1="160" x2="300" y2="160" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+  <line x1="288" y1="200" x2="308" y2="200" stroke="#555" stroke-width="3" stroke-linecap="round"/>
+  <line x1="288" y1="240" x2="300" y2="240" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+  <line x1="288" y1="280" x2="308" y2="280" stroke="#555" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Pull indicator line (the key feature) -->
+  <line x1="210" y1="200" x2="302" y2="200" stroke="#f5a623" stroke-width="3" stroke-linecap="round" stroke-dasharray="6 4"/>
+
+  <!-- Small flame above pull line -->
+  <path d="M340 185 Q348 170 344 158 Q352 168 350 180 Q356 165 354 152 Q366 170 360 188 Q368 175 364 160 Q378 182 372 200 Q378 190 376 178 Q390 200 384 218 Q388 210 388 200 Q396 220 386 238 Q378 252 360 256 Q340 258 326 244 Q312 230 316 212 Q320 196 340 185Z" fill="url(#flameGrad)" opacity="0.9"/>
+
+  <defs>
+    <linearGradient id="mercuryGrad" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ff5a2c"/>
+      <stop offset="100%" stop-color="#f5a623"/>
+    </linearGradient>
+    <radialGradient id="bulbGrad" cx="50%" cy="50%">
+      <stop offset="0%" stop-color="#ff6b4a"/>
+      <stop offset="70%" stop-color="#cc3300"/>
+      <stop offset="100%" stop-color="#8b1a00"/>
+    </radialGradient>
+    <linearGradient id="flameGrad" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ff5a2c"/>
+      <stop offset="50%" stop-color="#f5a623"/>
+      <stop offset="100%" stop-color="#fff176" stop-opacity="0.8"/>
+    </linearGradient>
+  </defs>
+</svg>

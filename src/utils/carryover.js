@@ -99,7 +99,10 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
  * @param {number} params.thicknessInches - Thickness of the thickest point (inches)
  * @param {number} [params.restMinutes]   - Rest duration to model (default 10)
  * @param {number} [params.ambientTempF]  - Kitchen temperature (default 72°F)
- * @param {string} [params.categoryId]    - Protein category ('beef','pork','poultry','seafood','baked')
+ * @param {string} [params.categoryId]          - Protein category ('beef','pork','poultry','seafood','baked')
+ * @param {number|null} [params.overrideSurfaceTempF] - Actual surface temp measured by probe at pull (°F).
+ *   When provided, replaces the method-model estimate for the surface gradient.
+ *   This makes the rest-screen prediction data-driven rather than model-driven.
  * @returns {{
  *   deltaF: number,
  *   peakTempF: number,
@@ -107,6 +110,12 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
  *   restProfile: Array<{minute: number, tempF: number}>,
  *   fourier: number,
  *   surfaceTempAtPull: number,
+ *   surfaceGradientF: number,
+ *   penetrationFactor: number,
+ *   fractionReached: number,
+ *   halfThicknessM: number,
+ *   thermalDiffusivity: number,
+ *   surfaceDataSource: 'measured'|'modeled',
  * }}
  */
 export function estimateCarryover({
@@ -116,6 +125,9 @@ export function estimateCarryover({
   restMinutes = 15,
   ambientTempF = 72,
   categoryId = 'beef',
+  overrideSurfaceTempF = null,
+  isWrapped = false,       // Foil / butcher paper rest (Texas Crutch). Traps surface heat,
+                           // eliminating evaporative and convective losses → more inward conduction.
 }) {
   // Sous vide: bath temp = target — virtually no internal gradient at pull.
   // The sear after the bath adds ~1–2°F which we represent as deltaF:1.
@@ -124,9 +136,15 @@ export function estimateCarryover({
       deltaF: 1,
       peakTempF: pullTempF + 1,
       minutesToPeak: 1,
-      restProfile: generateCoolingProfile(pullTempF + 1, restMinutes, ambientTempF),
+      restProfile: generateCoolingProfile(pullTempF + 1, restMinutes, ambientTempF, thicknessInches),
       fourier: 0,
       surfaceTempAtPull: pullTempF + 3,
+      surfaceGradientF: 3,
+      penetrationFactor: 0,
+      fractionReached: 0,
+      halfThicknessM: (thicknessInches * 0.0254) / 2,
+      thermalDiffusivity: ALPHA,
+      surfaceDataSource: 'modeled',
     };
   }
 
@@ -136,14 +154,21 @@ export function estimateCarryover({
   // Time to peak carryover (empirically ~35–50% of the "Fourier time constant")
   // Large cuts take longer to peak; thin cuts peak quickly
   const timeConstantSec = (L * L) / ALPHA; // ~seconds for meaningful heat redistribution
-  const minutesToPeak = Math.max(3, Math.min(30, (timeConstantSec / 60) * 0.45));
+  // Cap raised to 120 min — large roasts (3"+) genuinely need 60-90 min to peak.
+  // The old 30-min cap was accurate for steaks but wrong for briskets/prime ribs.
+  const minutesToPeak = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
 
-  // Fourier number at rest duration (minimum 4 min to model plating carryover)
-  const t = Math.max(restMinutes, 4) * 60;
-  const Fo = (ALPHA * t) / (L * L);
+  // TWEAK 1: Evaluate Fourier number at the moment of peak carryover, not at the
+  // arbitrary end of rest. Fo represents how far the heat front has penetrated
+  // by the time the center temperature peaks — the physically meaningful instant.
+  const tPeakSec = minutesToPeak * 60;
+  const Fo = (ALPHA * tPeakSec) / (L * L);
 
-  // Surface-to-center gradient at pull
-  const surfaceTempAtPull = estimateSurfaceTempAtPull(methodId, pullTempF);
+  // Surface-to-center gradient at pull.
+  // If a real probe reading is available, use it directly — this makes the prediction
+  // data-driven rather than model-driven. Otherwise fall back to the method model.
+  const surfaceDataSource = overrideSurfaceTempF != null ? 'measured' : 'modeled';
+  const surfaceTempAtPull = overrideSurfaceTempF ?? estimateSurfaceTempAtPull(methodId, pullTempF);
   const surfaceGradient = surfaceTempAtPull - pullTempF;
 
   // Fraction of gradient that reaches center (heat equation analytical solution for slab)
@@ -151,15 +176,23 @@ export function estimateCarryover({
 
   // Penetration factor — accounts for surface cooling, 3D geometry, evaporative losses.
   //
-  // Seafood gets a higher factor (0.80) because:
-  //  - Thin fillets (0.5–1.0") have short heat-conduction paths
-  //  - High water content (~75%) improves thermal conductivity vs. mammalian muscle
-  //  - Empirical data: 0.75" fish fillet at pan-sear spikes 15–19°F at the center
-  //    (vs ~7–9°F for a 1" beef steak) — the full surface gradient transfers rapidly
-  //  - Practical consequence: pull seafood aggressively early at high heat
+  // Unwrapped (default):
+  //   Seafood 0.80 — thin fillets + high water content transfer heat rapidly;
+  //     empirical: 0.75" fish at pan-sear spikes 15–19°F at center
+  //   Mammalian/avian 0.28 — calibrated to Thermoworks 7–9°F for 1" steak
   //
-  // Mammalian / avian muscle: 0.28 (calibrated to Thermoworks 5–7°F for steaks)
-  const penetrationFactor = categoryId === 'seafood' ? 0.80 : 0.28;
+  // isWrapped (foil/butcher paper rest):
+  //   Eliminates evaporative cooling and convective loss to ambient air.
+  //   Surface heat has nowhere to go but inward → factor nearly doubles.
+  //   Seafood 0.85 — minimal practical change (rarely wrapped)
+  //   Mammalian/avian 0.50 — reflects reduced surface loss during foil rest;
+  //     conservative: a cambro/cooler brisket rest can reach even higher.
+  let penetrationFactor;
+  if (categoryId === 'seafood') {
+    penetrationFactor = isWrapped ? 0.85 : 0.80;
+  } else {
+    penetrationFactor = isWrapped ? 0.50 : 0.28;
+  }
 
   const rawCarryover = surfaceGradient * fractionReached * penetrationFactor;
 
@@ -174,6 +207,7 @@ export function estimateCarryover({
     minutesToPeak,
     restMinutes,
     ambientTempF,
+    thicknessInches,
   });
 
   return {
@@ -183,6 +217,12 @@ export function estimateCarryover({
     restProfile,
     fourier: Math.round(Fo * 100) / 100,
     surfaceTempAtPull: Math.round(surfaceTempAtPull),
+    surfaceGradientF: Math.round(surfaceGradient * 10) / 10,
+    penetrationFactor,
+    fractionReached: Math.round(fractionReached * 1000) / 1000,
+    halfThicknessM: Math.round(L * 10000) / 10000,
+    thermalDiffusivity: ALPHA,
+    surfaceDataSource,
   };
 }
 
@@ -190,13 +230,19 @@ export function estimateCarryover({
  * Generate the temperature profile over rest:
  * Phase 1: Rise (carryover) — heat flows inward
  * Phase 2: Decline (cooling) — Newton's law of cooling
+ *
+ * TWEAK 2: k scales inversely with thickness. A 0.5" steak (k≈0.030) cools
+ * rapidly; a 3" roast (k≈0.005) holds heat for much longer. This reflects the
+ * surface-area-to-volume ratio decreasing with thickness.
  */
-function generateCarryoverProfile({ pullTempF, peakTempF, minutesToPeak, restMinutes, ambientTempF }) {
+function generateCarryoverProfile({ pullTempF, peakTempF, minutesToPeak, restMinutes, ambientTempF, thicknessInches = 1.0 }) {
   const profile = [];
-  // Cooling constant k ≈ 0.008–0.015 /min for typical roasts in still air
-  const k = 0.010;
+  const k = 0.015 / Math.max(0.25, thicknessInches);
 
-  for (let minute = 0; minute <= Math.max(restMinutes, 60); minute++) {
+  // Profile must extend past the peak — especially important for large roasts where
+  // minutesToPeak can exceed 60 min. Always show the peak + at least 30 min of cooling.
+  const profileEnd = Math.max(restMinutes, minutesToPeak + 30);
+  for (let minute = 0; minute <= profileEnd; minute++) {
     let tempF;
     if (minute <= minutesToPeak) {
       // Rising phase: exponential approach to peak
@@ -212,9 +258,9 @@ function generateCarryoverProfile({ pullTempF, peakTempF, minutesToPeak, restMin
   return profile;
 }
 
-/** Simple cooling profile (no carryover rise) */
-function generateCoolingProfile(startTempF, restMinutes, ambientTempF) {
-  const k = 0.010;
+/** Simple cooling profile (no carryover rise) — thickness-aware k */
+function generateCoolingProfile(startTempF, restMinutes, ambientTempF, thicknessInches = 1.0) {
+  const k = 0.015 / Math.max(0.25, thicknessInches);
   const profile = [];
   for (let minute = 0; minute <= Math.max(restMinutes, 30); minute++) {
     const tempF = ambientTempF + (startTempF - ambientTempF) * Math.exp(-k * minute);

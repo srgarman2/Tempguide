@@ -685,9 +685,32 @@ html, body, #root {
   align-items: center;
   gap: 10px;
   padding: 12px 18px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1.5px dashed rgba(255, 255, 255, 0.18);
   border-radius: var(--radius-md);
+  transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
+}
+.manual-temp-input:focus-within {
+  border-style: solid;
+  border-color: var(--accent, rgba(255, 255, 255, 0.35));
+  background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.06);
+}
+.manual-temp-input--near {
+  border-color: rgba(255, 180, 60, 0.5) !important;
+  border-style: solid !important;
+  background: rgba(255, 180, 60, 0.06) !important;
+}
+.manual-temp-input--warning {
+  border-color: rgba(255, 75, 75, 0.6) !important;
+  border-style: solid !important;
+  background: rgba(255, 75, 75, 0.08) !important;
+  box-shadow: 0 0 0 3px rgba(255, 75, 75, 0.1) !important;
+  animation: warningPulse 2s ease-in-out infinite;
+}
+@keyframes warningPulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(255, 75, 75, 0.1); }
+  50%      { box-shadow: 0 0 0 6px rgba(255, 75, 75, 0.06); }
 }
 .manual-temp-input label {
   font-size: 13px;
@@ -707,11 +730,21 @@ html, body, #root {
   outline: none;
   width: 0;
 }
-.manual-temp-input input::placeholder { color: var(--text-tertiary); }
+.manual-temp-input input::placeholder {
+  color: var(--text-tertiary);
+  font-size: 15px;
+  font-weight: 500;
+}
 .manual-temp-input .unit {
   font-size: 16px;
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+/* Warning state for cook cards */
+.cook-card--warning {
+  border-color: rgba(255, 107, 74, 0.4);
+  background: rgba(255, 75, 75, 0.06);
 }
 
 /* ── Action Button ────────────────────────────────────────────────────────── */
@@ -894,6 +927,237 @@ html, body, #root {
 }
 .wrap-card span { color: var(--text-secondary); }
 .wrap-card strong { color: rgba(255, 160, 40, 0.9); font-size: 15px; }
+
+/* ── If Pulled Now Card ───────────────────────────────────────────────────── */
+.pull-now-card {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.pull-now-verdict-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-align: right;
+  flex: 1;
+  padding-left: 8px;
+}
+
+.pull-now-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 0 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.pull-now-hero-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.pull-now-hero-col:last-child {
+  text-align: right;
+}
+.pull-now-hero-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.pull-now-hero-temp {
+  font-size: 1.7rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.pull-now-hero-arrow {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+
+.pull-now-overshoot-tip {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 75, 75, 0.06);
+  border: 1px solid rgba(255, 75, 75, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.pull-now-overshoot-tip strong { color: rgba(255, 120, 100, 0.9); font-weight: 600; }
+.pull-now-overshoot-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+
+/* ── Prediction Card ──────────────────────────────────────────────────────── */
+.prediction-hero {
+  text-align: center;
+  padding: 12px 0 14px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.prediction-hero-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.prediction-hero-value {
+  font-size: 2rem;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+/* ── Physics Sensor Snapshot ─────────────────────────────────────────────── */
+.physics-sensor-snapshot {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: rgba(76, 222, 128, 0.04);
+  border: 1px solid rgba(76, 222, 128, 0.15);
+  border-radius: var(--radius-sm);
+}
+.physics-sensor-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(76, 222, 128, 0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+.physics-sensor-row {
+  display: flex;
+  gap: 5px;
+  align-items: flex-end;
+}
+.physics-sensor-pip {
+  flex: 1;
+  border-radius: 4px;
+  padding: 6px 2px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.physics-sensor-temp {
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.9);
+  font-variant-numeric: tabular-nums;
+}
+.physics-sensor-id {
+  font-size: 8px;
+  color: rgba(255,255,255,0.5);
+  font-weight: 600;
+}
+.physics-sensor-role {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.9);
+  margin-top: -1px;
+}
+/* Core sensor: green ring */
+.physics-sensor-pip--core {
+  outline: 2px solid #4cde80;
+  outline-offset: 1px;
+  border-radius: 5px;
+}
+/* Surface sensor: amber ring */
+.physics-sensor-pip--surface {
+  outline: 2px solid #f5a623;
+  outline-offset: 1px;
+  border-radius: 5px;
+}
+
+/* ── CookScreen Sensor Bar virtual sensor roles ──────────────────────────── */
+.sensor-pip--core {
+  outline: 2px solid #4cde80;
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+.sensor-pip--surface {
+  outline: 2px solid #f5a623;
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+/* ── Physics Model Card ──────────────────────────────────────────────────── */
+.physics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.physics-param {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+}
+.physics-param-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+.physics-param-value {
+  font-size: 17px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin-bottom: 2px;
+}
+.physics-param-symbol {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: 'Inter', system-ui, monospace;
+  letter-spacing: 0.01em;
+}
+.physics-param-detail {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  line-height: 1.35;
+}
+
+.physics-formula {
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+.physics-formula-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+.physics-formula-eq {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+}
 
 /* ── Spacer ───────────────────────────────────────────────────────────────── */
 .spacer { flex: 1; }

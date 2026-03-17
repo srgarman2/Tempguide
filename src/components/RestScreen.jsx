@@ -43,6 +43,8 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
         ? item.restRangeMinutes[0]
         : (item.restMinutes ?? 10));
 
+  const hasMeasuredData = selection.actualCoreTempF != null && selection.actualSurfaceTempF != null;
+
   const timer = useRestTimer({
     methodId: selection.methodId,
     pullTempF,
@@ -50,6 +52,8 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     restMinutes,
     thicknessInches: selection.thicknessInches,
     categoryId: selection.categoryId,
+    actualCoreTempF: selection.actualCoreTempF ?? null,
+    actualSurfaceTempF: selection.actualSurfaceTempF ?? null,
     onComplete: () => {},
   });
 
@@ -75,6 +79,15 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   const RING_C = 180;
   const circumference = 2 * Math.PI * RING_R;
   const dashOffset = circumference * (1 - timer.progressPct / 100);
+
+  // Physics display helpers
+  const thicknessDisplay = selection.thicknessInches
+    ? `${selection.thicknessInches}"` : '1.0"';
+
+  const categoryLabel = {
+    beef: 'Mammalian', pork: 'Mammalian', poultry: 'Avian',
+    seafood: 'Seafood', baked: 'Baked',
+  }[selection.categoryId] || selection.categoryId;
 
   return (
     <div className="screen rest-screen" style={{ '--accent': category.accentColor }}>
@@ -181,29 +194,185 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
         )}
       </div>
 
-      {/* Live carryover estimate */}
-      <div className="cook-card" style={{ margin: '0 20px 12px', position: 'relative', zIndex: 1 }}>
+      {/* ── Prediction Card: primary output ──────────────────────────── */}
+      <div className="cook-card prediction-card" style={{ margin: '0 20px 12px', position: 'relative', zIndex: 1 }}>
         <div className="cook-card-header">
-          <span className="cook-card-title">Carryover Tracking</span>
-          <span className="cook-card-value" style={{ color: '#f5a623' }}>
+          <span className="cook-card-title">Prediction</span>
+          <span className="cook-card-value" style={{
+            color: timer.hasReachedTarget ? '#4cde80' : '#f5a623',
+          }}>
             ~{timer.estimatedCurrentTempF}°F
           </span>
         </div>
+
+        {/* Time to target — the hero number */}
+        {timer.timeToTargetMin != null && (
+          <div className="prediction-hero">
+            <div className="prediction-hero-label">Est. time to reach {endTempDisplay}</div>
+            <div className="prediction-hero-value" style={{ color: category.accentColor }}>
+              {timer.isRunning && timer.remainingToTargetSec != null ? (
+                timer.remainingToTargetSec <= 0
+                  ? 'Target reached!'
+                  : formatTime(timer.remainingToTargetSec)
+              ) : (
+                `~${timer.timeToTargetMin} min`
+              )}
+            </div>
+          </div>
+        )}
+        {timer.timeToTargetMin == null && (
+          <div className="prediction-hero">
+            <div className="prediction-hero-label">Est. time to reach {endTempDisplay}</div>
+            <div className="prediction-hero-value" style={{ color: 'var(--text-tertiary)', fontSize: 16 }}>
+              Carryover may not reach target
+            </div>
+          </div>
+        )}
+
+        {/* Core tracking rows */}
+        <div className="carryover-row">
+          <span className="label">Est. core temp</span>
+          <span className="val" style={{ color: '#f5a623' }}>~{timer.estimatedCurrentTempF}°F</span>
+        </div>
+        <div className="carryover-row">
+          <span className="label">
+            {hasMeasuredData ? '🌡 Surface temp at pull (measured)' : 'Est. surface temp at pull'}
+          </span>
+          <span className="val" style={{ color: hasMeasuredData ? '#4cde80' : 'var(--text-primary)' }}>
+            {carryover.surfaceTempAtPull}°F
+          </span>
+        </div>
+        <div className="carryover-row">
+          <span className="label">Ambient</span>
+          <span className="val">72°F</span>
+        </div>
+        {timer.isRunning && (
+          <div className="carryover-row">
+            <span className="label">Temp slope</span>
+            <span className="val" style={{
+              color: timer.tempSlopePerMin > 0 ? '#f5a623' : timer.tempSlopePerMin < 0 ? '#66bbff' : 'var(--text-primary)',
+            }}>
+              {timer.tempSlopePerMin > 0 ? '+' : ''}{timer.tempSlopePerMin}°F/min
+            </span>
+          </div>
+        )}
         <div className="carryover-row">
           <span className="label">Pull temp</span>
           <span className="val">{timer.adjustedPullTempF}°F</span>
-        </div>
-        <div className="carryover-row">
-          <span className="label">Est. peak (+{carryover.deltaF}°F)</span>
-          <span className="val" style={{ color: '#f5a623' }}>{carryover.peakTempF.toFixed(1)}°F</span>
         </div>
         <div className="carryover-row">
           <span className="label">Target final</span>
           <span className="val">{endTempDisplay}</span>
         </div>
         <div className="carryover-row">
-          <span className="label">Minutes to peak carryover</span>
+          <span className="label">Est. peak (+{carryover.deltaF}°F)</span>
+          <span className="val" style={{ color: '#f5a623' }}>{carryover.peakTempF.toFixed(1)}°F</span>
+        </div>
+        <div className="carryover-row">
+          <span className="label">Time to peak</span>
           <span className="val">~{carryover.minutesToPeak} min</span>
+        </div>
+      </div>
+
+      {/* ── Physics Card: carryover model internals ──────────────────── */}
+      <div className="cook-card physics-card" style={{ margin: '0 20px 12px', position: 'relative', zIndex: 1 }}>
+        <div className="cook-card-header">
+          <span className="cook-card-title">Physics Model</span>
+          <span style={{
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
+            padding: '2px 7px', borderRadius: 20,
+            background: hasMeasuredData ? 'rgba(76,222,128,0.12)' : 'rgba(255,255,255,0.06)',
+            border: `1px solid ${hasMeasuredData ? 'rgba(76,222,128,0.35)' : 'rgba(255,255,255,0.12)'}`,
+            color: hasMeasuredData ? '#4cde80' : 'var(--text-tertiary)',
+          }}>
+            {hasMeasuredData ? '🌡 Measured' : 'Modeled'}
+          </span>
+        </div>
+
+        {/* Sensor snapshot at pull — only shown when real data is available */}
+        {hasMeasuredData && selection.sensorReadingsAtPull && (
+          <div className="physics-sensor-snapshot">
+            <div className="physics-sensor-label">
+              Probe at pull — core: T{(selection.virtualCoreIndexAtPull ?? 0) + 1},
+              surface: T{(selection.virtualSurfaceIndexAtPull ?? selection.sensorReadingsAtPull.length - 1) + 1}
+            </div>
+            <div className="physics-sensor-row">
+              {selection.sensorReadingsAtPull.map((temp, i) => {
+                const minT = Math.min(...selection.sensorReadingsAtPull);
+                const maxT = Math.max(...selection.sensorReadingsAtPull);
+                const norm = maxT > minT ? (temp - minT) / (maxT - minT) : 0;
+                const r = Math.round(60 + norm * 195);
+                const g = Math.round(200 - norm * 130);
+                const b = Math.round(220 - norm * 200);
+                const isCore    = i === selection.virtualCoreIndexAtPull;
+                const isSurface = i === selection.virtualSurfaceIndexAtPull;
+                return (
+                  <div
+                    key={i}
+                    className={`physics-sensor-pip${isCore ? ' physics-sensor-pip--core' : isSurface ? ' physics-sensor-pip--surface' : ''}`}
+                    style={{ background: `rgb(${r},${g},${b})` }}
+                  >
+                    <div className="physics-sensor-temp">{Math.round(temp)}°</div>
+                    <div className="physics-sensor-id">T{i + 1}</div>
+                    {isCore    && <div className="physics-sensor-role">core</div>}
+                    {isSurface && <div className="physics-sensor-role">surf</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="physics-grid">
+          <PhysicsParam
+            label="Fourier Number"
+            symbol="Fo = α·t / L²"
+            value={carryover.fourier}
+            detail="Dimensionless time — higher = more equilibrated"
+          />
+          <PhysicsParam
+            label="Surface Gradient"
+            symbol={hasMeasuredData ? '🌡 T_surface − T_core (probe)' : 'ΔT surface→core (model)'}
+            value={`${carryover.surfaceGradientF}°F`}
+            detail={`Surface ${carryover.surfaceTempAtPull}°F → Core ${timer.adjustedPullTempF}°F at pull`}
+          />
+          <PhysicsParam
+            label="Fraction Reached"
+            symbol="1 − e^(−π²Fo/4)"
+            value={carryover.fractionReached}
+            detail="How much of the gradient conducts inward"
+          />
+          <PhysicsParam
+            label="Penetration Factor"
+            symbol={categoryLabel}
+            value={carryover.penetrationFactor}
+            detail={carryover.penetrationFactor >= 0.5
+              ? 'High: thin + high water content → fast transfer'
+              : 'Standard: accounts for 3D geometry, surface cooling'}
+          />
+          <PhysicsParam
+            label="Half-Thickness"
+            symbol="L = thickness / 2"
+            value={`${(carryover.halfThicknessM * 1000).toFixed(1)} mm`}
+            detail="Heat conduction path length"
+          />
+          <PhysicsParam
+            label="Thermal Diffusivity"
+            symbol="α (muscle tissue)"
+            value={`${(carryover.thermalDiffusivity * 1e7).toFixed(2)} × 10⁻⁷ m²/s`}
+            detail=""
+          />
+        </div>
+
+        {/* The formula summary */}
+        <div className="physics-formula">
+          <div className="physics-formula-label">Carryover Model</div>
+          <div className="physics-formula-eq">
+            ΔT = gradient × fraction × penetration
+          </div>
+          <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+            {carryover.surfaceGradientF}°F × {carryover.fractionReached} × {carryover.penetrationFactor} = <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
+          </div>
         </div>
       </div>
 
@@ -240,6 +409,18 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
       </button>
 
       <div className="pb-safe" />
+    </div>
+  );
+}
+
+/** Individual physics parameter display */
+function PhysicsParam({ label, symbol, value, detail }) {
+  return (
+    <div className="physics-param">
+      <div className="physics-param-label">{label}</div>
+      <div className="physics-param-value">{value}</div>
+      <div className="physics-param-symbol">{symbol}</div>
+      {detail && <div className="physics-param-detail">{detail}</div>}
     </div>
   );
 }
