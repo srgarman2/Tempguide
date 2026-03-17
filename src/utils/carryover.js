@@ -66,7 +66,10 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
     'grill-medium':   30,   // Medium grill — contact + radiant heat
     'grill-high':     45,   // High heat grill — steeper gradient than oven
     'pan-sear':       40,   // Hot pan: effective sub-surface gradient ~40°F above center
-    'basting-flip':   30,   // Already uses lower pull temps; moderate remaining gradient
+    'basting-flip':   65,   // Continuous hot-butter basting (~320–350°F) persists AFTER pull;
+                            // residual surface heat drives 15–20°F rise in thin cuts.
+                            // Chris Young empirical: "up to 20°F" for small/thin steaks.
+                            // Calibrated: 0.5" → ~18°F, 1.0" → ~15°F, 1.5" → ~9°F.
     'air-fryer':      25,   // High-convection, similar to oven-moderate
   };
   const excess = surfaceExcessF[methodId] ?? 45;
