@@ -5,12 +5,13 @@ import { estimateCarryover } from '../utils/carryover';
  * Manages the rest timer and live carryover temperature tracking.
  *
  * @param {Object} params
- * @param {string}  params.methodId        - Cooking method ID
- * @param {number}  params.pullTempF       - Temperature at which protein was pulled
- * @param {number}  params.endTempF        - Target final temperature
- * @param {number}  params.restMinutes     - Recommended rest duration (minutes)
+ * @param {string}  params.methodId          - Cooking method ID
+ * @param {number}  params.pullTempF         - Temperature at which protein was pulled
+ * @param {number}  params.endTempF          - Target final temperature
+ * @param {number}  params.restMinutes       - Recommended rest duration (minutes)
  * @param {number}  [params.thicknessInches] - Thickness for physics model
- * @param {Function} [params.onComplete]   - Called when timer finishes
+ * @param {string}  [params.categoryId]      - Protein category for physics model
+ * @param {Function} [params.onComplete]     - Called when timer finishes
  */
 export default function useRestTimer({
   methodId,
@@ -18,6 +19,7 @@ export default function useRestTimer({
   endTempF,
   restMinutes = 10,
   thicknessInches = 1.0,
+  categoryId = 'beef',
   onComplete,
 }) {
   const [isRunning, setIsRunning]     = useState(false);
@@ -33,11 +35,11 @@ export default function useRestTimer({
   // adjusted pull = endTemp − deltaF, then recompute for correct profile.
   const carryover = (() => {
     if (methodId === 'sous-vide') {
-      return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes });
+      return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId });
     }
-    const { deltaF } = estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes });
+    const { deltaF } = estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId });
     const adjustedPull = endTempF != null ? Math.round(endTempF - deltaF) : pullTempF;
-    return estimateCarryover({ methodId, pullTempF: adjustedPull, thicknessInches, restMinutes });
+    return estimateCarryover({ methodId, pullTempF: adjustedPull, thicknessInches, restMinutes, categoryId });
   })();
 
   const adjustedPullTempF = endTempF != null && methodId !== 'sous-vide'

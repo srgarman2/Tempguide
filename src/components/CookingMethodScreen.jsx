@@ -72,6 +72,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
             pullTempF,
             thicknessInches: thickness,
             restMinutes: 10,
+            categoryId: selection.categoryId,
           });
 
           return (

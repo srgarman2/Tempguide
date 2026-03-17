@@ -49,6 +49,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     endTempF,
     restMinutes,
     thicknessInches: selection.thicknessInches,
+    categoryId: selection.categoryId,
     onComplete: () => {},
   });
 

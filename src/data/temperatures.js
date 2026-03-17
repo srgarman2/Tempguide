@@ -270,9 +270,9 @@ export const CATEGORIES = [
             pullTemp: { min: 122, max: 128 },
             endTemp: { min: 130, max: 137 },
             restMinutes: 10,
-            notes: 'Kenji Lopez-Alt pulls pork chops at 125°F for maximum juiciness. Slightly pink is safe.',
+            notes: 'Kenji Lopez-Alt pulls pork chops at 125°F for maximum juiciness. Slightly pink is safe — USDA 2011 updated minimum is 145°F with a 3-min rest, and pasteurization at 145°F for that hold time achieves the same lethality as higher temps. A hot pan + 10-min rest lands you safely in range.',
             sousVideTemp: 135,
-            sources: ['Kenji Lopez-Alt'],
+            sources: ['Kenji Lopez-Alt', 'USDA FSIS 2011'],
           },
           {
             level: 'USDA Minimum',
@@ -363,7 +363,7 @@ export const CATEGORIES = [
         endTemp: 148,
         endTempRange: [145, 155],
         restMinutes: 10,
-        notes: 'USDA says 165°F, but pasteurization is time+temperature: 54.4 sec at 155°F achieves same lethality. Chris Young targets 145–150°F for the breast. Measure in the thickest part of the breast, not touching bone.',
+        notes: 'USDA Appendix A pasteurization equivalence: 165°F (instant) = 155°F for 54 sec = 150°F for 1.3 min = 145°F for 4.2 min. Pull breast at 140°F — oven carryover + a 10-min rest completes pasteurization. Juicy, not chalky. Measure in the thickest part of breast, not touching bone.',
         sources: ['Chris Young', 'USDA FSIS (Appendix A)'],
       },
       {
@@ -376,7 +376,7 @@ export const CATEGORIES = [
         endTemp: 152,
         endTempRange: [150, 155],
         restMinutes: 10,
-        notes: 'Target 150–155°F for maximum moisture. The breast is done long before 165°F by pasteurization tables. Use a thermometer — not the "juices run clear" test.',
+        notes: 'USDA Appendix A: 150°F for 1.3 min = safe (same Salmonella lethality as 165°F). Target 150–155°F for maximum moisture — above 160°F the breast turns dry and chalky. Use a thermometer; "juices run clear" is an unreliable test.',
       },
       {
         id: 'chicken-thighs',
@@ -388,7 +388,7 @@ export const CATEGORIES = [
         endTemp: 175,
         endTempRange: [170, 185],
         restMinutes: 10,
-        notes: 'Dark meat benefits from higher temps — the extra collagen and fat makes them juicy even at 185°F. Crispy skin requires finishing at high direct heat.',
+        notes: 'Dark meat is safe at 150°F+ but benefits from higher temps: collagen converts to gelatin at 160–180°F, improving texture and juiciness. Target 170–185°F for tender, pull-apart thighs. Crispy skin requires finishing at high direct heat.',
       },
       {
         id: 'turkey',
@@ -399,7 +399,7 @@ export const CATEGORIES = [
         pullTemp: 140,
         endTemp: 155,
         restMinutes: 30,
-        notes: '1.3 min at 155°F achieves Salmonella lethality (USDA Appendix A). Breast to 155°F, thighs to 165–175°F. Spatchcocking dramatically evens cooking and reduces time.',
+        notes: 'USDA Appendix A: 150°F for 1.3 min achieves Salmonella lethality. Pull breast at 140°F — sustained oven carryover + 30-min rest on a whole bird finishes pasteurization safely. Thighs to 165–175°F for collagen breakdown. Spatchcocking dramatically evens cooking and cuts time by 30–40%.',
         sources: ['USDA FSIS (Appendix A)'],
       },
     ],
@@ -423,7 +423,7 @@ export const CATEGORIES = [
         pullTemp: 105,
         endTemp: 115,
         restMinutes: 0,
-        notes: 'Sushi-grade tuna is meant to be served raw or barely seared. 30–45 sec per side in a screaming hot pan. Center should remain cold-cool and translucent.',
+        notes: 'Sushi-grade tuna: 30–45 sec per side in a screaming hot pan. Center should remain cold and translucent. ⚠️ High-heat carryover is rapid in thin tuna steaks — the goal is minimal interior cooking, so serve immediately off the pan.',
       },
       {
         id: 'salmon',
@@ -435,7 +435,7 @@ export const CATEGORIES = [
         endTemp: 125,
         endTempRange: [120, 130],
         restMinutes: 0,
-        notes: 'Kenji Lopez-Alt target: 125°F for silky, translucent center. USDA says 145°F but that\'s very dry. Skin side down first in a cold pan (start cold, heat together) for even rendering.',
+        notes: 'Kenji Lopez-Alt target: 125°F for silky, translucent center. ⚠️ Carryover alert: a 0.75" fillet in a screaming hot pan can spike 15–19°F — thin fish transfers heat extremely fast due to high water content. The app auto-adjusts pull temp based on thickness. Skin side down first in a cold pan for even rendering.',
         sources: ['Kenji Lopez-Alt'],
       },
       {
@@ -448,7 +448,7 @@ export const CATEGORIES = [
         endTemp: 130,
         endTempRange: [120, 140],
         restMinutes: 0,
-        notes: 'Kenji\'s favorite is 130°F but suggests 120–140°F range. Halibut dries out fast — err on the lower side.',
+        notes: 'Target 120–140°F — halibut dries out fast. ⚠️ At pan-sear or grill-high, carryover in thin halibut fillets can reach 12–18°F. Pull aggressively early and plate immediately. Sous vide at 130°F with a quick butter-baste sear is the most forgiving method.',
         sources: ['Kenji Lopez-Alt'],
       },
       {
@@ -460,7 +460,7 @@ export const CATEGORIES = [
         pullTemp: 115,
         endTemp: 120,
         restMinutes: 0,
-        notes: 'Shrimp cook in seconds. Watch for the C→O shape transition: C = done, O = overcooked. Internal temp is less useful than visual cues here.',
+        notes: 'Shrimp cook in seconds — internal temp is less reliable than visual cues. Watch the C→O shape transition: C-shape = done (tails touch but not curled tight), O-shape = overcooked. The rapid carryover from high heat means you must pull the moment you see the C-shape.',
       },
       {
         id: 'scallops',
@@ -471,7 +471,7 @@ export const CATEGORIES = [
         pullTemp: 120,
         endTemp: 130,
         restMinutes: 0,
-        notes: 'Use dry-packed (not wet) scallops. Pat completely dry. Very hot pan, do not move once placed. 90 sec per side. Pull when center still slightly translucent.',
+        notes: 'Use dry-packed (not wet) scallops — wet-packed won\'t brown. Pat completely dry. Very hot pan, do not move once placed. 90 sec per side. ⚠️ Pull when center is still slightly translucent — carryover in a thin scallop continues even off heat. Serve immediately.',
       },
       {
         id: 'lobster',
@@ -482,7 +482,7 @@ export const CATEGORIES = [
         pullTemp: 130,
         endTemp: 140,
         restMinutes: 0,
-        notes: 'Lobster is done when opaque and slightly firm. At 140°F+ the texture becomes rubbery. Cook directly from live or raw-frozen.',
+        notes: 'Lobster is done when opaque and slightly firm. At 140°F+ the texture becomes rubbery. ⚠️ Lobster tails are thin — carryover can push 10–15°F at high heat. Pull when flesh is just opaque and serve immediately. Sous vide at 140°F is the most consistent method.',
       },
     ],
   },

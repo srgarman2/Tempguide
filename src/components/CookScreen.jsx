@@ -60,6 +60,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         pullTempF: rawEndTemp ?? 125,
         thicknessInches: selection.thicknessInches,
         restMinutes: Math.max(restMinutes, 4),
+        categoryId: selection.categoryId,
       });
     }
     const { deltaF } = estimateCarryover({
@@ -67,6 +68,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       pullTempF: rawPullTemp ?? 125,
       thicknessInches: selection.thicknessInches,
       restMinutes: Math.max(restMinutes, 4),
+      categoryId: selection.categoryId,
     });
     const adjustedPull = rawEndTemp != null ? Math.round(rawEndTemp - deltaF) : (rawPullTemp ?? 125);
     return estimateCarryover({
@@ -74,8 +76,9 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       pullTempF: adjustedPull,
       thicknessInches: selection.thicknessInches,
       restMinutes: Math.max(restMinutes, 4),
+      categoryId: selection.categoryId,
     });
-  }, [selection.methodId, rawPullTemp, rawEndTemp, selection.thicknessInches, restMinutes, method.id]);
+  }, [selection.methodId, selection.categoryId, rawPullTemp, rawEndTemp, selection.thicknessInches, restMinutes, method.id]);
 
   // For sous vide: pull = bath = target. For others: pull = endTemp − carryover.
   const displayPullTemp = method.id === 'sous-vide'
@@ -119,11 +122,14 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
 
       {/* Manual temp input when not connected */}
       {!isConnected && (
-        <div className="manual-temp-input" style={{ margin: '0 20px 12px' }}>
-          <label>Enter temp manually</label>
+        <div
+          className={`manual-temp-input${shouldPull ? ' manual-temp-input--warning' : currentTemp !== null && currentTemp >= displayPullTemp - 5 ? ' manual-temp-input--near' : ''}`}
+          style={{ margin: '0 20px 12px' }}
+        >
+          <label>Current temp</label>
           <input
             type="number"
-            placeholder="—"
+            placeholder="Enter °F"
             value={manualTemp}
             onChange={e => setManualTemp(e.target.value)}
             inputMode="decimal"
@@ -136,43 +142,25 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       {isConnected && thermo.sensors && (
         <div className="cook-card" style={{ margin: '0 20px 12px' }}>
           <div className="cook-card-header">
-            <span className="cook-card-title">Probe Sensors (T1=tip → T8=handle)</span>
+            <span className="cook-card-title">
+              {thermo.isInstantRead
+                ? 'Instant Read — T1 tip only'
+                : 'Probe Sensors (T1=tip → T8=handle)'}
+            </span>
+            {thermo.isInstantRead && (
+              <span style={{
+                fontSize: 11, fontWeight: 600, color: '#f5a623',
+                background: 'rgba(245,166,35,0.12)', padding: '2px 8px',
+                borderRadius: 20, border: '1px solid rgba(245,166,35,0.3)',
+              }}>INSTANT</span>
+            )}
           </div>
           <SensorBar sensors={thermo.sensors} accentColor={category.accentColor} />
         </div>
       )}
 
       <div className="cook-cards">
-        {/* Pull temp */}
-        <div className="cook-card">
-          <div className="cook-card-header">
-            <span className="cook-card-title">Pull Temperature</span>
-            <span className="cook-card-value" style={{ color: category.accentColor }}>
-              {displayPullTemp ? `${displayPullTemp}°F` : '—'}
-            </span>
-          </div>
-          {method.id !== 'sous-vide' && (
-            <div className="carryover-row">
-              <span className="label">Carryover (+{co.deltaF}°F)</span>
-              <span className="val">→ {endTempDisplay} final</span>
-            </div>
-          )}
-          {method.id === 'sous-vide' && (
-            <div className="carryover-row">
-              <span className="label">Bath temperature = target</span>
-              <span className="val">No carryover</span>
-            </div>
-          )}
-          {isBasting && (
-            <div className="carryover-row">
-              <span className="label" style={{ color: 'rgba(255,180,80,0.8)' }}>
-                Basting/flip method — lower pull temp accounts for continuous surface heat
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Target temp */}
+        {/* Target temp — the user's goal, shown first */}
         <div className="cook-card">
           <div className="cook-card-header">
             <span className="cook-card-title">Target Final Temperature</span>
@@ -190,6 +178,36 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           )}
         </div>
 
+        {/* Pull temp — the app's recommendation, derived from target */}
+        <div className={`cook-card${shouldPull ? ' cook-card--warning' : ''}`}>
+          <div className="cook-card-header">
+            <span className="cook-card-title">Recommended Pull Temperature</span>
+            <span className="cook-card-value" style={{ color: shouldPull ? '#ff6b4a' : category.accentColor }}>
+              {displayPullTemp ? `${displayPullTemp}°F` : '—'}
+            </span>
+          </div>
+          {method.id !== 'sous-vide' && (
+            <div className="carryover-row">
+              <span className="label">
+                {displayPullTemp}°F + {co.deltaF}°F carryover = {endTempDisplay}
+              </span>
+            </div>
+          )}
+          {method.id === 'sous-vide' && (
+            <div className="carryover-row">
+              <span className="label">Bath temperature = target</span>
+              <span className="val">No carryover</span>
+            </div>
+          )}
+          {isBasting && (
+            <div className="carryover-row">
+              <span className="label" style={{ color: 'rgba(255,180,80,0.8)' }}>
+                Basting/flip method — lower pull accounts for continuous surface heat
+              </span>
+            </div>
+          )}
+        </div>
+
         {/* Carryover details */}
         {method.id !== 'sous-vide' && (
           <div className="cook-card">
@@ -202,7 +220,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <span className="val">{method.label}</span>
             </div>
             <div className="carryover-row">
-              <span className="label">Est. surface temp at pull</span>
+              <span className="label">Sub-surface gradient at pull</span>
               <span className="val">{co.surfaceTempAtPull}°F</span>
             </div>
             <div className="carryover-row">
