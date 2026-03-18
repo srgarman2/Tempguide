@@ -54,6 +54,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     categoryId: selection.categoryId,
     actualCoreTempF: selection.actualCoreTempF ?? null,
     actualSurfaceTempF: selection.actualSurfaceTempF ?? null,
+    ambientTempF: selection.actualAmbientTempF ?? 72,
     onComplete: () => {},
   });
 
@@ -243,8 +244,12 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           </span>
         </div>
         <div className="carryover-row">
-          <span className="label">Ambient</span>
-          <span className="val">72°F</span>
+          <span className="label">Ambient {selection.actualAmbientTempF != null ? '🌡' : ''}</span>
+          <span className="val">
+            {selection.actualAmbientTempF != null
+              ? `${selection.actualAmbientTempF.toFixed(1)}°F (probe)`
+              : '72°F (assumed)'}
+          </span>
         </div>
         {timer.isRunning && (
           <div className="carryover-row">

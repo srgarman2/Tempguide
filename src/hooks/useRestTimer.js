@@ -13,6 +13,7 @@ import { estimateCarryover } from '../utils/carryover';
  * @param {string}       [params.categoryId]        - Protein category for physics model
  * @param {number|null}  [params.actualCoreTempF]   - Actual core temp from probe at moment of pull
  * @param {number|null}  [params.actualSurfaceTempF] - Actual surface temp from probe at moment of pull
+ * @param {number}       [params.ambientTempF]       - Ambient temperature (default 72°F; use probe reading when available)
  * @param {Function}     [params.onComplete]        - Called when timer finishes
  */
 export default function useRestTimer({
@@ -24,6 +25,7 @@ export default function useRestTimer({
   categoryId = 'beef',
   actualCoreTempF = null,
   actualSurfaceTempF = null,
+  ambientTempF = 72,
   onComplete,
 }) {
   const [isRunning, setIsRunning]     = useState(false);
@@ -46,7 +48,7 @@ export default function useRestTimer({
   //     adjustedPull = endTempF − deltaF ensures pull + carryover = target.
   const carryover = (() => {
     if (methodId === 'sous-vide') {
-      return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId });
+      return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId, ambientTempF });
     }
 
     if (actualCoreTempF != null) {
@@ -58,13 +60,14 @@ export default function useRestTimer({
         restMinutes,
         categoryId,
         overrideSurfaceTempF: actualSurfaceTempF,
+        ambientTempF,
       });
     }
 
     // Path B: model-driven — calibrate profile to peak at endTempF
-    const { deltaF } = estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId });
+    const { deltaF } = estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId, ambientTempF });
     const adjustedPull = endTempF != null ? Math.round(endTempF - deltaF) : pullTempF;
-    return estimateCarryover({ methodId, pullTempF: adjustedPull, thicknessInches, restMinutes, categoryId });
+    return estimateCarryover({ methodId, pullTempF: adjustedPull, thicknessInches, restMinutes, categoryId, ambientTempF });
   })();
 
   // The effective pull temp shown in UI:

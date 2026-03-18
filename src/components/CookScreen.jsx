@@ -2,12 +2,22 @@ import { useState, useMemo } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover, formatTemp, getCookStatus } from '../utils/carryover';
 import { THERMOMETER_STATE } from '../hooks/useThermometer';
+import useCookHistory from '../hooks/useCookHistory';
 import NavBar from './NavBar';
 import TempGauge from './TempGauge';
 import ThermoBar from './ThermoBar';
+import CookChart from './CookChart';
 
 export default function CookScreen({ selection, thermo, navigate, goBack, SCREENS }) {
   const [manualTemp, setManualTemp] = useState('');
+
+  // Hooks must be called before any early return (React rules of hooks).
+  // Compute temp values inline so useCookHistory is always called.
+  const isConnected = thermo.state === THERMOMETER_STATE.CONNECTED;
+  const currentTemp = isConnected
+    ? thermo.coreTemp
+    : (manualTemp !== '' ? parseFloat(manualTemp) : null);
+  const cookHistory = useCookHistory(currentTemp, isConnected ? thermo.surfaceTemp : null);
 
   const category = getCategoryById(selection.categoryId);
   const item = getItemById(selection.categoryId, selection.itemId);
@@ -51,6 +61,9 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     ? (doneness?.bastingRestMinutes ?? doneness?.restMinutes ?? item.restMinutes ?? 10)
     : (doneness?.restMinutes ?? item.restMinutes ?? 0);
 
+  // Use probe ambient sensor when available, otherwise assume room temp
+  const ambientTempF = isConnected && thermo.ambientTemp != null ? thermo.ambientTemp : 72;
+
   // Carryover calculation — deltaF is independent of pullTempF (surface gradient = excess),
   // so we derive the adjusted pull temp from endTemp − deltaF ensuring pull + carryover = target.
   const co = useMemo(() => {
@@ -61,6 +74,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         thicknessInches: selection.thicknessInches,
         restMinutes: Math.max(restMinutes, 4),
         categoryId: selection.categoryId,
+        ambientTempF,
       });
     }
     const { deltaF } = estimateCarryover({
@@ -69,6 +83,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       thicknessInches: selection.thicknessInches,
       restMinutes: Math.max(restMinutes, 4),
       categoryId: selection.categoryId,
+      ambientTempF,
     });
     const adjustedPull = rawEndTemp != null ? Math.round(rawEndTemp - deltaF) : (rawPullTemp ?? 125);
     return estimateCarryover({
@@ -77,19 +92,21 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       thicknessInches: selection.thicknessInches,
       restMinutes: Math.max(restMinutes, 4),
       categoryId: selection.categoryId,
+      ambientTempF,
     });
-  }, [selection.methodId, selection.categoryId, rawPullTemp, rawEndTemp, selection.thicknessInches, restMinutes, method.id]);
+  }, [selection.methodId, selection.categoryId, rawPullTemp, rawEndTemp, selection.thicknessInches, restMinutes, method.id, ambientTempF]);
 
   // For sous vide: pull = bath = target. For others: pull = endTemp − carryover.
   const displayPullTemp = method.id === 'sous-vide'
     ? (doneness?.sousVideTemp ?? rawEndTemp)
     : rawEndTemp != null ? Math.round(rawEndTemp - co.deltaF) : rawPullTemp;
 
-  // Determine current temp: BLE if connected, else manual input
-  const isConnected = thermo.state === THERMOMETER_STATE.CONNECTED;
-  const currentTemp = isConnected
-    ? thermo.coreTemp
-    : (manualTemp !== '' ? parseFloat(manualTemp) : null);
+  // Resolve endTempRange for chart target zone band
+  const rawEndTempRange = doneness
+    ? (doneness.endTemp != null && typeof doneness.endTemp === 'object'
+        ? [doneness.endTemp.min, doneness.endTemp.max]
+        : null)
+    : (Array.isArray(item.endTempRange) ? item.endTempRange : null);
 
   const status = getCookStatus(currentTemp, displayPullTemp, rawEndTemp);
   const shouldPull = currentTemp !== null && currentTemp >= displayPullTemp;
@@ -109,6 +126,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       restMinutes: Math.max(restMinutes, 4),
       categoryId: selection.categoryId,
       overrideSurfaceTempF: liveSurfaceTemp,
+      ambientTempF,
     });
     const projectedPeak = Math.round((currentTemp + preview.deltaF) * 10) / 10;
     const deltaFromTarget = rawEndTemp != null ? Math.round((projectedPeak - rawEndTemp) * 10) / 10 : null;
@@ -140,6 +158,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       thicknessInches: selection.thicknessInches,
       actualCoreTempF:    isConnected ? thermo.coreTemp    : null,
       actualSurfaceTempF: isConnected ? thermo.surfaceTemp : null,
+      actualAmbientTempF: isConnected ? thermo.ambientTemp : null,
       sensorReadingsAtPull:      hasFullSensors ? [...thermo.sensors] : null,
       virtualCoreIndexAtPull:    hasFullSensors ? thermo.virtualCoreIndex    : null,
       virtualSurfaceIndexAtPull: hasFullSensors ? thermo.virtualSurfaceIndex : null,
@@ -212,6 +231,18 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           />
         </div>
       )}
+
+      {/* Cook progress chart with "If Pulled Now" projection */}
+      <CookChart
+        history={cookHistory.history}
+        projectionProfile={pullNowPreview?.preview?.restProfile ?? null}
+        currentCoreTemp={currentTemp}
+        currentMinute={cookHistory.elapsedMin}
+        pullTempF={displayPullTemp}
+        endTempF={rawEndTemp}
+        endTempRange={rawEndTempRange}
+        accentColor={category.accentColor}
+      />
 
       <div className="cook-cards">
         {/* Target temp — the user's goal, shown first */}
@@ -342,8 +373,12 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <span className="val">{pullNowPreview.preview.fourier}</span>
             </div>
             <div className="carryover-row">
-              <span className="label">Ambient assumed</span>
-              <span className="val">72°F (room temp)</span>
+              <span className="label">Ambient {isConnected && thermo.ambientTemp != null ? '🌡' : '(assumed)'}</span>
+              <span className="val">
+                {isConnected && thermo.ambientTemp != null
+                  ? `${thermo.ambientTemp.toFixed(1)}°F (probe)`
+                  : '72°F (room temp)'}
+              </span>
             </div>
 
             {/* Overshoot recovery tip */}
