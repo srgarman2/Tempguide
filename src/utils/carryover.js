@@ -256,8 +256,26 @@ export function estimateCarryover({
   // Surface-to-center gradient at pull.
   // If a real probe reading is available, use it directly — this makes the prediction
   // data-driven rather than model-driven. Otherwise fall back to the method model.
+  //
+  // Thickness scaling for the model path:
+  //   Cook time scales as L² — a thicker cut spends much longer at high heat before
+  //   the center reaches pull temp. The outer layers accumulate proportionally more
+  //   thermal energy. Empirically, gradient depth grows with sqrt(L), so we scale
+  //   the modeled surface excess by sqrt(thicknessInches) relative to the 1" baseline.
+  //
+  //   Effect (pan-sear, pf=0.28):
+  //     1.0" → ×1.00 → 7.5°F  (baseline, unchanged)
+  //     1.5" → ×1.22 → 9.2°F
+  //     2.0" → ×1.41 → 10.6°F
+  //     3.0" → ×1.73 → 13.0°F
+  //
+  //   Thin cuts (≤1") keep their existing behaviour (the minutesToPeak floor at 3 min
+  //   already pushes Fo above 0.45 and slightly raises their fractionReached).
+  const modelledSurfaceTemp  = estimateSurfaceTempAtPull(methodId, pullTempF);
+  const thicknessScale       = Math.max(1.0, Math.sqrt(thicknessInches)); // ≥1" only
+  const scaledSurfaceTemp    = pullTempF + (modelledSurfaceTemp - pullTempF) * thicknessScale;
   const surfaceDataSource = overrideSurfaceTempF != null ? 'measured' : 'modeled';
-  const surfaceTempAtPull = overrideSurfaceTempF ?? estimateSurfaceTempAtPull(methodId, pullTempF);
+  const surfaceTempAtPull = overrideSurfaceTempF ?? scaledSurfaceTemp;
   const surfaceGradient = surfaceTempAtPull - pullTempF;
 
   // Fraction of gradient that reaches center (heat equation analytical solution for slab)
