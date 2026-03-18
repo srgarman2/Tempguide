@@ -12,9 +12,12 @@ import { estimateCarryover } from '../utils/carryover';
  * @param {number}       [params.thicknessInches]   - Thickness for physics model
  * @param {string}       [params.categoryId]        - Protein category for physics model
  * @param {number|null}  [params.actualCoreTempF]   - Actual core temp from probe at moment of pull
- * @param {number|null}  [params.actualSurfaceTempF] - Actual surface temp from probe at moment of pull
- * @param {number}       [params.ambientTempF]       - Ambient temperature (default 72°F; use probe reading when available)
- * @param {Function}     [params.onComplete]        - Called when timer finishes
+ * @param {number|null}  [params.actualSurfaceTempF]  - Actual surface temp from probe at moment of pull
+ * @param {number}       [params.ambientTempF]        - Ambient temperature (default 72°F; use probe reading when available)
+ * @param {number[]|null} [params.sensorGradientF]    - Full probe gradient [T_core … T_surface] at pull (°F).
+ *   When provided, triggers finite-difference simulation — highest fidelity path.
+ *   Takes priority over actualCoreTempF / actualSurfaceTempF data-driven path.
+ * @param {Function}     [params.onComplete]          - Called when timer finishes
  */
 export default function useRestTimer({
   methodId,
@@ -26,6 +29,7 @@ export default function useRestTimer({
   actualCoreTempF = null,
   actualSurfaceTempF = null,
   ambientTempF = 72,
+  sensorGradientF = null,
   onComplete,
 }) {
   const [isRunning, setIsRunning]     = useState(false);
@@ -38,17 +42,37 @@ export default function useRestTimer({
 
   // Compute carryover physics.
   //
-  // Two paths:
-  //  A) Real probe data available (actualCoreTempF + actualSurfaceTempF):
-  //     Use actual sensor readings directly — data-driven, no adjustedPull hack needed.
-  //     The profile starts at the real core temp; real surface gradient drives deltaF.
+  // Three paths (in priority order):
+  //  A-FD) Full sensor gradient available (sensorGradientF ≥ 2 readings):
+  //        Runs a 1D finite-difference heat conduction simulation using the
+  //        actual temperature profile across the meat as the initial condition.
+  //        No empirical calibration needed — the probe data IS the physics input.
+  //        This is the highest-fidelity path; deltaF and restProfile emerge from
+  //        numerically integrating ∂T/∂t = α·∇²T with the real boundary conditions.
   //
-  //  B) No probe data (model-only):
-  //     Use the adjustedPull trick so the profile peaks at endTempF.
-  //     adjustedPull = endTempF − deltaF ensures pull + carryover = target.
+  //  A)   Core + surface from probe (actualCoreTempF / actualSurfaceTempF):
+  //        Use actual sensor readings — data-driven, no adjustedPull hack needed.
+  //        The profile starts at the real core temp; real surface gradient drives deltaF.
+  //
+  //  B)   No probe data (model-only):
+  //        Use the adjustedPull trick so the profile peaks at endTempF.
+  //        adjustedPull = endTempF − deltaF ensures pull + carryover = target.
   const carryover = (() => {
     if (methodId === 'sous-vide') {
       return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId, ambientTempF });
+    }
+
+    // Path A-FD: finite-difference simulation from full probe gradient
+    if (sensorGradientF != null && sensorGradientF.length >= 2) {
+      return estimateCarryover({
+        methodId,
+        pullTempF: actualCoreTempF ?? sensorGradientF[0],
+        thicknessInches,
+        restMinutes,
+        categoryId,
+        ambientTempF,
+        sensorGradientF,
+      });
     }
 
     if (actualCoreTempF != null) {

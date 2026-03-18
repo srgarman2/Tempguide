@@ -113,24 +113,43 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
 
   // ── "If pulled now" live preview ────────────────────────────────────────
   // Recalculates carryover using current temp as the hypothetical pull temp.
-  // When probe is connected with full sensors, uses the probe-identified virtual
-  // surface sensor for an accurate gradient. Assumes room-temp ambient (72°F).
-  const pullNowPreview = (() => {
+  // When probe is connected in Normal mode, uses the full T_core→T_surface gradient
+  // to run a finite-difference simulation — highest fidelity prediction.
+  // Falls back to overrideSurfaceTempF (single surface sensor) or empirical model.
+  // Wrapped in useMemo so the FD simulation (~2ms) doesn't re-run on every render.
+  const pullNowPreview = useMemo(() => {
     if (method.id === 'sous-vide' || currentTemp == null) return null;
-    // surfaceTemp is null in Instant Read mode (hook handles this)
+
+    // Full sensor gradient: slice from virtual core to virtual surface (inclusive).
+    // Only available in Normal mode with full 8-sensor data.
+    const liveGradient = (
+      isConnected &&
+      !thermo.isInstantRead &&
+      thermo.sensors != null &&
+      thermo.sensors.length >= 2 &&
+      thermo.virtualSurfaceIndex != null
+    ) ? thermo.sensors.slice(thermo.virtualCoreIndex, thermo.virtualSurfaceIndex + 1)
+      : null;
+
+    // surfaceTemp is null in Instant Read mode (hook handles this); used as fallback
     const liveSurfaceTemp = isConnected ? thermo.surfaceTemp : null;
+
     const preview = estimateCarryover({
       methodId: selection.methodId,
       pullTempF: currentTemp,
       thicknessInches: selection.thicknessInches,
       restMinutes: Math.max(restMinutes, 4),
       categoryId: selection.categoryId,
-      overrideSurfaceTempF: liveSurfaceTemp,
+      overrideSurfaceTempF: liveSurfaceTemp,   // used only if liveGradient is null
+      sensorGradientF: liveGradient,            // triggers FD when available
       ambientTempF,
     });
-    const projectedPeak = Math.round((currentTemp + preview.deltaF) * 10) / 10;
+
+    const projectedPeak   = Math.round((currentTemp + preview.deltaF) * 10) / 10;
     const deltaFromTarget = rawEndTemp != null ? Math.round((projectedPeak - rawEndTemp) * 10) / 10 : null;
-    const surfaceSource = liveSurfaceTemp != null ? 'measured' : 'modeled';
+    const surfaceSource   = liveGradient   != null ? 'finite-diff'
+                          : liveSurfaceTemp != null ? 'measured'
+                          : 'modeled';
 
     // Verdict based on delta from target
     let verdict, verdictColor, verdictIcon;
@@ -146,8 +165,13 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       verdict = `Keep cooking — ${Math.abs(deltaFromTarget)}°F below target`; verdictColor = 'var(--text-secondary)'; verdictIcon = '⏳';
     }
 
-    return { preview, projectedPeak, deltaFromTarget, verdict, verdictColor, verdictIcon, surfaceSource, liveSurfaceTemp };
-  })();
+    return { preview, projectedPeak, deltaFromTarget, verdict, verdictColor, verdictIcon, surfaceSource, liveSurfaceTemp, liveGradient };
+  }, [
+    method.id, currentTemp, selection.methodId, selection.categoryId,
+    selection.thicknessInches, restMinutes, rawEndTemp,
+    thermo.surfaceTemp, thermo.sensors, thermo.virtualCoreIndex,
+    thermo.virtualSurfaceIndex, thermo.isInstantRead, isConnected, ambientTempF,
+  ]);
 
   const handlePull = () => {
     // Capture live probe readings at the exact moment of pull.
@@ -359,18 +383,27 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
             )}
             <div className="carryover-row">
               <span className="label">
-                Surface gradient {pullNowPreview.surfaceSource === 'measured' ? '🌡' : '(modeled)'}
+                Surface gradient{' '}
+                {pullNowPreview.surfaceSource === 'finite-diff' ? '🔬'
+                  : pullNowPreview.surfaceSource === 'measured' ? '🌡'
+                  : '(modeled)'}
               </span>
               <span className="val">
-                {pullNowPreview.liveSurfaceTemp != null
-                  ? `${pullNowPreview.liveSurfaceTemp.toFixed(1)}°F (probe)`
-                  : `${pullNowPreview.preview.surfaceTempAtPull}°F (est.)`
+                {pullNowPreview.surfaceSource === 'finite-diff'
+                  ? `${pullNowPreview.preview.surfaceGradientF}°F (${pullNowPreview.liveGradient?.length}-sensor FD)`
+                  : pullNowPreview.liveSurfaceTemp != null
+                    ? `${pullNowPreview.liveSurfaceTemp.toFixed(1)}°F (probe)`
+                    : `${pullNowPreview.preview.surfaceTempAtPull}°F (est.)`
                 }
               </span>
             </div>
             <div className="carryover-row">
               <span className="label">Fourier Fo</span>
-              <span className="val">{pullNowPreview.preview.fourier}</span>
+              <span className="val">
+                {pullNowPreview.preview.fourier != null
+                  ? pullNowPreview.preview.fourier
+                  : 'N/A (FD sim)'}
+              </span>
             </div>
             <div className="carryover-row">
               <span className="label">Ambient {isConnected && thermo.ambientTemp != null ? '🌡' : '(assumed)'}</span>

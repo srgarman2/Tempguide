@@ -45,6 +45,19 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
 
   const hasMeasuredData = selection.actualCoreTempF != null && selection.actualSurfaceTempF != null;
 
+  // Extract core-to-surface gradient slice from the full sensor snapshot captured at pull.
+  // sensorReadingsAtPull is all 8 sensor temps; we slice from virtualCore to virtualSurface (inclusive).
+  const sensorGradientF = (
+    selection.sensorReadingsAtPull != null &&
+    selection.virtualCoreIndexAtPull != null &&
+    selection.virtualSurfaceIndexAtPull != null
+  ) ? selection.sensorReadingsAtPull.slice(
+      selection.virtualCoreIndexAtPull,
+      selection.virtualSurfaceIndexAtPull + 1
+    ) : null;
+
+  const hasSensorGradient = sensorGradientF != null && sensorGradientF.length >= 2;
+
   const timer = useRestTimer({
     methodId: selection.methodId,
     pullTempF,
@@ -55,6 +68,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     actualCoreTempF: selection.actualCoreTempF ?? null,
     actualSurfaceTempF: selection.actualSurfaceTempF ?? null,
     ambientTempF: selection.actualAmbientTempF ?? 72,
+    sensorGradientF,
     onComplete: () => {},
   });
 
@@ -286,11 +300,19 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <span style={{
             fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
             padding: '2px 7px', borderRadius: 20,
-            background: hasMeasuredData ? 'rgba(76,222,128,0.12)' : 'rgba(255,255,255,0.06)',
-            border: `1px solid ${hasMeasuredData ? 'rgba(76,222,128,0.35)' : 'rgba(255,255,255,0.12)'}`,
-            color: hasMeasuredData ? '#4cde80' : 'var(--text-tertiary)',
+            background: hasSensorGradient
+              ? 'rgba(102,187,255,0.12)'
+              : hasMeasuredData
+                ? 'rgba(76,222,128,0.12)'
+                : 'rgba(255,255,255,0.06)',
+            border: `1px solid ${hasSensorGradient
+              ? 'rgba(102,187,255,0.35)'
+              : hasMeasuredData
+                ? 'rgba(76,222,128,0.35)'
+                : 'rgba(255,255,255,0.12)'}`,
+            color: hasSensorGradient ? '#66bbff' : hasMeasuredData ? '#4cde80' : 'var(--text-tertiary)',
           }}>
-            {hasMeasuredData ? '🌡 Measured' : 'Modeled'}
+            {hasSensorGradient ? '🔬 Finite Diff' : hasMeasuredData ? '🌡 Measured' : 'Modeled'}
           </span>
         </div>
 
@@ -332,28 +354,38 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <PhysicsParam
             label="Fourier Number"
             symbol="Fo = α·t / L²"
-            value={carryover.fourier}
-            detail="Dimensionless time — higher = more equilibrated"
+            value={carryover.fourier ?? 'N/A'}
+            detail={carryover.fourier == null
+              ? 'Not used in finite-difference mode'
+              : 'Dimensionless time — higher = more equilibrated'}
           />
           <PhysicsParam
             label="Surface Gradient"
-            symbol={hasMeasuredData ? '🌡 T_surface − T_core (probe)' : 'ΔT surface→core (model)'}
+            symbol={hasSensorGradient
+              ? `🔬 T_core → T_surface (${sensorGradientF.length} sensors)`
+              : hasMeasuredData
+                ? '🌡 T_surface − T_core (probe)'
+                : 'ΔT surface→core (model)'}
             value={`${carryover.surfaceGradientF}°F`}
             detail={`Surface ${carryover.surfaceTempAtPull}°F → Core ${timer.adjustedPullTempF}°F at pull`}
           />
           <PhysicsParam
             label="Fraction Reached"
             symbol="1 − e^(−π²Fo/4)"
-            value={carryover.fractionReached}
-            detail="How much of the gradient conducts inward"
+            value={carryover.fractionReached ?? 'N/A'}
+            detail={carryover.fractionReached == null
+              ? 'Not used in finite-difference mode'
+              : 'How much of the gradient conducts inward'}
           />
           <PhysicsParam
             label="Penetration Factor"
             symbol={categoryLabel}
-            value={carryover.penetrationFactor}
-            detail={carryover.penetrationFactor >= 0.5
-              ? 'High: thin + high water content → fast transfer'
-              : 'Standard: accounts for 3D geometry, surface cooling'}
+            value={carryover.penetrationFactor ?? 'N/A'}
+            detail={carryover.penetrationFactor == null
+              ? 'Not used in finite-difference mode'
+              : carryover.penetrationFactor >= 0.5
+                ? 'High: thin + high water content → fast transfer'
+                : 'Standard: accounts for 3D geometry, surface cooling'}
           />
           <PhysicsParam
             label="Half-Thickness"
@@ -371,13 +403,25 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
 
         {/* The formula summary */}
         <div className="physics-formula">
-          <div className="physics-formula-label">Carryover Model</div>
-          <div className="physics-formula-eq">
-            ΔT = gradient × fraction × penetration
-          </div>
-          <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-            {carryover.surfaceGradientF}°F × {carryover.fractionReached} × {carryover.penetrationFactor} = <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
-          </div>
+          {hasSensorGradient ? (
+            <>
+              <div className="physics-formula-label">Finite-Difference Model</div>
+              <div className="physics-formula-eq">∂T/∂t = α · ∇²T (numerically integrated)</div>
+              <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                {sensorGradientF.length}-sensor gradient → <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="physics-formula-label">Carryover Model</div>
+              <div className="physics-formula-eq">
+                ΔT = gradient × fraction × penetration
+              </div>
+              <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                {carryover.surfaceGradientF}°F × {carryover.fractionReached} × {carryover.penetrationFactor} = <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 

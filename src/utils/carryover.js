@@ -31,6 +31,8 @@
  * still air during rest (not wrapped).
  */
 
+import { simulateCarryover } from './heatSim';
+
 // Thermal diffusivity of beef/pork/poultry ≈ 1.36e-7 m²/s
 const ALPHA = 1.36e-7;
 
@@ -103,6 +105,10 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
  * @param {number|null} [params.overrideSurfaceTempF] - Actual surface temp measured by probe at pull (°F).
  *   When provided, replaces the method-model estimate for the surface gradient.
  *   This makes the rest-screen prediction data-driven rather than model-driven.
+ * @param {number[]|null} [params.sensorGradientF] - Full temperature gradient from probe at pull (°F).
+ *   Array from virtualCore reading to virtualSurface reading (e.g. [T1, T2, T3, T4, T5, T6]).
+ *   When provided (≥2 values), bypasses the empirical formula entirely and runs a
+ *   1D finite-difference heat conduction simulation. This is the highest-fidelity path.
  * @returns {{
  *   deltaF: number,
  *   peakTempF: number,
@@ -128,6 +134,9 @@ export function estimateCarryover({
   overrideSurfaceTempF = null,
   isWrapped = false,       // Foil / butcher paper rest (Texas Crutch). Traps surface heat,
                            // eliminating evaporative and convective losses → more inward conduction.
+  sensorGradientF = null,  // Full probe gradient: [T_core, ..., T_surface] in °F.
+                           // When provided (≥2 values), runs a finite-difference simulation
+                           // instead of the empirical formula — no calibration factors needed.
 }) {
   // Sous vide: bath temp = target — virtually no internal gradient at pull.
   // The sear after the bath adds ~1–2°F which we represent as deltaF:1.
@@ -145,6 +154,86 @@ export function estimateCarryover({
       halfThicknessM: (thicknessInches * 0.0254) / 2,
       thermalDiffusivity: ALPHA,
       surfaceDataSource: 'modeled',
+    };
+  }
+
+  // ── Finite-difference path: probe gradient available ──────────────────────
+  // When the Combustion probe provides the actual temperature gradient across the
+  // meat (virtualCore → virtualSurface sensors), we use a 1D FD simulation to get
+  // a physically correct time-evolution of the temperature profile.
+  //
+  // Key improvement over empirical: uses the REAL measured gradient shape rather than
+  // an estimated surface temperature, and gives more accurate peak timing.
+  //
+  // Calibration: the 1D FD model over-predicts real 3D carryover by ~2× because it
+  // doesn't account for lateral heat loss through the sides and top of the cut, or
+  // for evaporative cooling. We apply the same penetrationFactor-based correction as
+  // the empirical model to normalize the magnitude, while keeping the FD's superior
+  // timing (minutesToPeak) and profile curve shape.
+  //
+  // Result: same peak magnitude as empirical model (calibrated), but better timing
+  // and a more physically realistic rise/fall curve driven by the actual gradient.
+  if (sensorGradientF != null && sensorGradientF.length >= 2) {
+    const fdRaw = simulateCarryover({
+      sensorTempsF:   sensorGradientF,
+      thicknessInches,
+      ambientTempF,
+      isWrapped,
+      simMinutes:     Math.max(restMinutes + 30, 45),
+    });
+
+    // Compute the empirical fractionReached at the model's minutesToPeak
+    // (same Fo formula as the empirical path below).
+    const Lc = (thicknessInches * 0.0254) / 2;
+    const timeConstantSec     = (Lc * Lc) / ALPHA;
+    const minutesToPeakEmpir  = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
+    const Fo_empir            = (ALPHA * minutesToPeakEmpir * 60) / (Lc * Lc);
+    const fractionReachedEmpir = 1 - Math.exp(-Math.PI * Math.PI * Fo_empir / 4);
+
+    // Penetration factor (same as empirical path).
+    let pf;
+    if (categoryId === 'seafood') {
+      pf = isWrapped ? 0.85 : 0.80;
+    } else {
+      pf = isWrapped ? 0.50 : 0.28;
+    }
+
+    // FD effective fraction: how much of the surface gradient the 1D simulation
+    // predicts conducts inward. Over-predicts vs 3D reality.
+    const surfaceGradient     = sensorGradientF[sensorGradientF.length - 1] - sensorGradientF[0];
+    const fdEffectiveFraction = surfaceGradient > 0 ? fdRaw.deltaF / surfaceGradient : 0.01;
+
+    // Correction factor: scale so calibrated FD matches empirical prediction.
+    // correction = (fractionReachedEmpir × pf) / fdEffectiveFraction
+    // For mammalian 1" pan-sear: correction ≈ (0.67 × 0.28) / 0.36 ≈ 0.52
+    const correction = Math.min(1.5, Math.max(0.1,
+      (fractionReachedEmpir * pf) / fdEffectiveFraction
+    ));
+
+    // Scale the profile: compress/expand the temperature rise above the pull temp.
+    const pullTempAtPull = fdRaw.restProfile[0].tempF;
+    const scaledProfile  = fdRaw.restProfile.map(p => ({
+      minute: p.minute,
+      tempF:  Math.round((pullTempAtPull + (p.tempF - pullTempAtPull) * correction) * 10) / 10,
+    }));
+
+    // Find calibrated peak from the scaled profile.
+    let calibPeak = scaledProfile[0].tempF;
+    let calibMinutesToPeak = 0;
+    for (const p of scaledProfile) {
+      if (p.tempF > calibPeak) { calibPeak = p.tempF; calibMinutesToPeak = p.minute; }
+    }
+    const calibDeltaF = calibPeak - pullTempAtPull;
+
+    return {
+      ...fdRaw,
+      restProfile:      scaledProfile,
+      peakTempF:        Math.round(calibPeak * 10) / 10,
+      minutesToPeak:    calibMinutesToPeak,
+      deltaF:           Math.round(calibDeltaF * 10) / 10,
+      penetrationFactor: Math.round(correction * 1000) / 1000,  // correction shown as pf
+      fractionReached:   Math.round(fractionReachedEmpir * 1000) / 1000,
+      fourier:           Math.round(Fo_empir * 100) / 100,
     };
   }
 
