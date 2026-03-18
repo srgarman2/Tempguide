@@ -329,8 +329,15 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <span className="val">{method.label}</span>
             </div>
             <div className="carryover-row">
-              <span className="label">Sub-surface gradient at pull</span>
-              <span className="val">{co.surfaceTempAtPull}°F</span>
+              <span className="label">
+                Sub-surface gradient at pull{' '}
+                {isConnected && thermo.surfaceTemp != null ? '🌡' : ''}
+              </span>
+              <span className="val">
+                {isConnected && thermo.surfaceTemp != null
+                  ? `${thermo.surfaceTemp.toFixed(1)}°F (probe)`
+                  : `${co.surfaceTempAtPull}°F (est.)`}
+              </span>
             </div>
             <div className="carryover-row">
               <span className="label">Thickness</span>
