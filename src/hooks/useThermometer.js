@@ -319,6 +319,7 @@ export default function useThermometer() {
     setSurfaceTemp(null);
     setAmbientTemp(null);
     setPredictedCoreTemp(null);
+    setBatteryOk(true);         // reset — stale false from a previous session would persist otherwise
     setGaugeAmbientTemp(null);
     setConnectedVia(null);
     charRef.current           = null;
@@ -390,14 +391,12 @@ export default function useThermometer() {
 
         if (frame.msgType === MSG_PROBE_STATUS) {
           // Probe Status (0x45): payload[0-3] = probe serial, payload[4:] = Device Status layout
-          if (frame.payload.length < 32) return; // need at least through prediction status
-          // Shift DataView past the 4-byte probe serial — rest matches Device Status Char exactly
-          const shiftedView = new DataView(
-            frame.payload.buffer,
-            frame.payload.byteOffset + 4,
-            frame.payload.byteLength - 4,
-          );
-          applyDeviceStatus(parseDeviceStatus(shiftedView));
+          if (frame.payload.length < 34) return; // need serial(4)+log(8)+temp(13)+mode(1)+battery(1)+prediction(7)
+          // IMPORTANT: use .slice(4) not a shifted DataView — parseDeviceStatus does
+          // `new Uint8Array(dataView.buffer)` which ignores byteOffset entirely.
+          // slice() creates a new ArrayBuffer at byteOffset=0 so indexing is correct.
+          const probeStatusBytes = frame.payload.slice(4);
+          applyDeviceStatus(parseDeviceStatus(new DataView(probeStatusBytes.buffer)));
 
         } else if (frame.msgType === MSG_GAUGE_STATUS) {
           // Gauge Status (0x60): GGG's own platinum RTD reading
@@ -510,6 +509,7 @@ export default function useThermometer() {
     setSurfaceTemp(null);
     setAmbientTemp(null);
     setPredictedCoreTemp(null);
+    setBatteryOk(true);         // reset on clean disconnect too
     setGaugeAmbientTemp(null);
     setConnectedVia(null);
   }, [handleNotification, onDisconnect]);
