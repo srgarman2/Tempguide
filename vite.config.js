@@ -3,17 +3,42 @@ import react from '@vitejs/plugin-react'
 
 /**
  * Dev-only proxy that forwards /api/bridge/* requests to a Combustion WiFi
- * accessory on the LAN, avoiding browser CORS restrictions.  The target host
- * is passed as a query-string parameter:
+ * accessory on the LAN, avoiding browser CORS restrictions.
  *
- *   GET /api/bridge/data?host=192.168.0.145
- *       → proxied to http://192.168.0.145/data
+ * Endpoints:
+ *   GET /api/bridge/probe?host=<ip>  — try common paths, return the first that works
+ *   GET /api/bridge/get?host=<ip>&path=/some/path — fetch an arbitrary path
  */
 function combustionBridgeProxy() {
+  const PROBE_PATHS = [
+    '/',
+    '/data',
+    '/api/data',
+    '/api/status',
+    '/status',
+    '/temperatures',
+    '/api/temperatures',
+    '/api/v1/data',
+    '/api/v1/status',
+    '/probe',
+  ];
+
+  async function fetchDevice(host, path, timeoutMs = 5000) {
+    const target = `http://${host}${path}`;
+    const resp = await fetch(target, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Accept: 'application/json, text/html, */*' },
+    });
+    const contentType = resp.headers.get('content-type') || '';
+    const body = await resp.text();
+    return { status: resp.status, contentType, body, path };
+  }
+
   return {
     name: 'combustion-bridge-proxy',
     configureServer(server) {
-      server.middlewares.use('/api/bridge', async (req, res) => {
+      // Probe endpoint — tries common paths to discover what the device exposes
+      server.middlewares.use('/api/bridge/probe', async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         const host = url.searchParams.get('host');
 
@@ -23,20 +48,36 @@ function combustionBridgeProxy() {
           return;
         }
 
-        // Strip the /api/bridge prefix to get the device-relative path
-        const devicePath = url.pathname.replace(/^\/?/, '/');
-        const target = `http://${host}${devicePath}`;
+        const results = [];
+        for (const path of PROBE_PATHS) {
+          try {
+            const r = await fetchDevice(host, path, 3000);
+            results.push({ path, status: r.status, contentType: r.contentType, body: r.body.slice(0, 2000) });
+          } catch (err) {
+            results.push({ path, status: 0, error: String(err?.message || err) });
+          }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ host, results }));
+      });
+
+      // Generic fetch endpoint — proxy any path to the device
+      server.middlewares.use('/api/bridge/get', async (req, res) => {
+        const url = new URL(req.url, 'http://localhost');
+        const host = url.searchParams.get('host');
+        const devicePath = url.searchParams.get('path') || '/';
+
+        if (!host) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing host query parameter' }));
+          return;
+        }
 
         try {
-          const resp = await fetch(target, {
-            signal: AbortSignal.timeout(5000),
-            headers: { Accept: 'application/json' },
-          });
-          const body = await resp.text();
-          res.writeHead(resp.status, {
-            'Content-Type': resp.headers.get('content-type') || 'application/json',
-          });
-          res.end(body);
+          const r = await fetchDevice(host, devicePath);
+          res.writeHead(r.status, { 'Content-Type': r.contentType || 'application/json' });
+          res.end(r.body);
         } catch (err) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: String(err?.message || err) }));

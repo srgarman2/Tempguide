@@ -3,8 +3,12 @@ import { THERMOMETER_STATE, THERMOMETER_TRANSPORT } from '../constants/thermomet
 import {
   WIFI_BRIDGE_CONFIG,
   fetchBridgeTelemetry,
+  probeBridge,
+  pickBestEndpoint,
   readStoredBridgeAddress,
   persistBridgeAddress,
+  readStoredBridgePath,
+  persistBridgePath,
 } from '../services/wifiBridge';
 
 /**
@@ -48,8 +52,10 @@ function mapBridgePayload(payload) {
 
 export default function useWifiBridge() {
   const [bridgeAddress, setBridgeAddressRaw] = useState(() => readStoredBridgeAddress());
+  const [bridgePath, setBridgePathRaw] = useState(() => readStoredBridgePath());
   const [state, setState] = useState(THERMOMETER_STATE.IDLE);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [probeResults, setProbeResults] = useState(null);
 
   const [sensors, setSensors] = useState(null);
   const [coreTemp, setCoreTemp] = useState(null);
@@ -70,6 +76,11 @@ export default function useWifiBridge() {
   const setBridgeAddress = useCallback((addr) => {
     setBridgeAddressRaw(addr);
     persistBridgeAddress(addr);
+  }, []);
+
+  const setBridgePath = useCallback((p) => {
+    setBridgePathRaw(p);
+    persistBridgePath(p);
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -110,13 +121,14 @@ export default function useWifiBridge() {
     setLastUpdateIso(new Date().toISOString());
   }, []);
 
-  const pullOnce = useCallback(async () => {
-    const payload = await fetchBridgeTelemetry({ address: bridgeAddress });
+  const pullOnce = useCallback(async (pathOverride) => {
+    const usePath = pathOverride || bridgePath;
+    const payload = await fetchBridgeTelemetry({ address: bridgeAddress, path: usePath });
     applyPayload(payload);
     consecutiveErrors.current = 0;
     setState(THERMOMETER_STATE.CONNECTED);
     setErrorMsg(null);
-  }, [applyPayload, bridgeAddress]);
+  }, [applyPayload, bridgeAddress, bridgePath]);
 
   const connect = useCallback(async () => {
     if (!bridgeAddress.trim()) {
@@ -130,11 +142,35 @@ export default function useWifiBridge() {
       setErrorMsg(null);
       consecutiveErrors.current = 0;
 
-      await pullOnce();
+      // Discover the right endpoint on the device
+      let activePath = bridgePath;
+
+      const results = await probeBridge({ address: bridgeAddress });
+      setProbeResults(results);
+
+      const best = pickBestEndpoint(results);
+
+      if (best) {
+        activePath = best.path;
+        setBridgePath(activePath);
+      } else if (!activePath) {
+        // No JSON endpoint found — build a diagnostic summary
+        const summary = results
+          .filter((r) => r.status > 0)
+          .map((r) => `${r.path} → ${r.status}`)
+          .join(', ');
+        throw new Error(
+          `Could not find a JSON telemetry endpoint on ${bridgeAddress}. ` +
+          `Probed paths: ${summary || 'none responded'}. ` +
+          `The device may not expose an HTTP API.`
+        );
+      }
+
+      await pullOnce(activePath);
 
       stopPolling();
       pollRef.current = setInterval(() => {
-        pullOnce().catch((err) => {
+        pullOnce(activePath).catch((err) => {
           consecutiveErrors.current += 1;
           if (consecutiveErrors.current >= 5) {
             stopPolling();
@@ -147,7 +183,7 @@ export default function useWifiBridge() {
       setState(THERMOMETER_STATE.ERROR);
       setErrorMsg(err.message ?? 'Failed to connect to WiFi bridge.');
     }
-  }, [bridgeAddress, pullOnce, stopPolling]);
+  }, [bridgeAddress, bridgePath, pullOnce, setBridgePath, stopPolling]);
 
   const disconnect = useCallback(() => {
     stopPolling();
@@ -179,6 +215,9 @@ export default function useWifiBridge() {
     disconnect,
     bridgeAddress,
     setBridgeAddress,
+    bridgePath,
+    setBridgePath,
+    probeResults,
     lastUpdateIso,
   };
 }

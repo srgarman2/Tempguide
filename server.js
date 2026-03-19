@@ -36,7 +36,31 @@ const MIME = {
 
 // ── Bridge proxy ────────────────────────────────────────────────────────────
 
-async function handleBridgeProxy(req, res) {
+const PROBE_PATHS = [
+  '/',
+  '/data',
+  '/api/data',
+  '/api/status',
+  '/status',
+  '/temperatures',
+  '/api/temperatures',
+  '/api/v1/data',
+  '/api/v1/status',
+  '/probe',
+];
+
+async function fetchDevice(host, path, timeoutMs = 5000) {
+  const target = `http://${host}${path}`;
+  const resp = await fetch(target, {
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: { Accept: 'application/json, text/html, */*' },
+  });
+  const contentType = resp.headers.get('content-type') || '';
+  const body = await resp.text();
+  return { status: resp.status, contentType, body, path };
+}
+
+async function handleBridgeProbe(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const host = url.searchParams.get('host');
 
@@ -46,19 +70,35 @@ async function handleBridgeProxy(req, res) {
     return;
   }
 
-  const devicePath = url.pathname.replace(/^\/?/, '/');
-  const target = `http://${host}${devicePath}`;
+  const results = [];
+  for (const path of PROBE_PATHS) {
+    try {
+      const r = await fetchDevice(host, path, 3000);
+      results.push({ path, status: r.status, contentType: r.contentType, body: r.body.slice(0, 2000) });
+    } catch (err) {
+      results.push({ path, status: 0, error: String(err?.message || err) });
+    }
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ host, results }));
+}
+
+async function handleBridgeGet(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const host = url.searchParams.get('host');
+  const devicePath = url.searchParams.get('path') || '/';
+
+  if (!host) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing host query parameter' }));
+    return;
+  }
 
   try {
-    const resp = await fetch(target, {
-      signal: AbortSignal.timeout(5000),
-      headers: { Accept: 'application/json' },
-    });
-    const body = await resp.text();
-    res.writeHead(resp.status, {
-      'Content-Type': resp.headers.get('content-type') || 'application/json',
-    });
-    res.end(body);
+    const r = await fetchDevice(host, devicePath);
+    res.writeHead(r.status, { 'Content-Type': r.contentType || 'application/json' });
+    res.end(r.body);
   } catch (err) {
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: String(err?.message || err) }));
@@ -93,8 +133,10 @@ async function serveStatic(req, res) {
 // ── Router ──────────────────────────────────────────────────────────────────
 
 const server = createServer((req, res) => {
-  if (req.url.startsWith('/api/bridge/')) {
-    handleBridgeProxy(req, res);
+  if (req.url.startsWith('/api/bridge/probe')) {
+    handleBridgeProbe(req, res);
+  } else if (req.url.startsWith('/api/bridge/get')) {
+    handleBridgeGet(req, res);
   } else {
     serveStatic(req, res);
   }

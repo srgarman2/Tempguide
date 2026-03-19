@@ -9,6 +9,9 @@
  * browser CORS and mixed-content restrictions. In dev mode, the Vite plugin
  * handles the proxy; in production, server.js handles it.
  *
+ * On initial connect the service probes the device to discover which endpoint
+ * returns JSON telemetry, then polls that endpoint.
+ *
  * Environment overrides:
  *   VITE_WIFI_BRIDGE_POLL_MS — polling interval in ms (default 2000)
  */
@@ -20,40 +23,94 @@ export const WIFI_BRIDGE_CONFIG = {
 };
 
 const STORAGE_KEY = 'combustion-wifi-bridge-v1';
+const PATH_KEY = 'combustion-wifi-bridge-path-v1';
 
 export function readStoredBridgeAddress() {
-  try {
-    return localStorage.getItem(STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
+  try { return localStorage.getItem(STORAGE_KEY) || ''; } catch { return ''; }
 }
 
 export function persistBridgeAddress(address) {
   try {
-    if (address) {
-      localStorage.setItem(STORAGE_KEY, address);
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  } catch {
-    // Storage unavailable — non-fatal
-  }
+    if (address) localStorage.setItem(STORAGE_KEY, address);
+    else localStorage.removeItem(STORAGE_KEY);
+  } catch { /* non-fatal */ }
+}
+
+export function readStoredBridgePath() {
+  try { return localStorage.getItem(PATH_KEY) || ''; } catch { return ''; }
+}
+
+export function persistBridgePath(path) {
+  try {
+    if (path) localStorage.setItem(PATH_KEY, path);
+    else localStorage.removeItem(PATH_KEY);
+  } catch { /* non-fatal */ }
 }
 
 /**
- * Build the URL to fetch bridge telemetry.
- * Always uses the same-origin proxy: /api/bridge/data?host=<ip>
+ * Probe the device to discover which endpoint returns usable JSON.
+ * Returns an array of { path, status, contentType, body, isJson }.
  */
-function bridgeDataUrl(address) {
+export async function probeBridge({ address, signal }) {
   const host = address.trim();
-  if (!host) return '';
-  return `/api/bridge/data?host=${encodeURIComponent(host)}`;
+  if (!host) throw new Error('No bridge address configured.');
+
+  const response = await fetch(
+    `/api/bridge/probe?host=${encodeURIComponent(host)}`,
+    { signal, headers: { Accept: 'application/json' } },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Probe failed with HTTP ${response.status}`);
+  }
+
+  const { results } = await response.json();
+
+  return results.map((r) => {
+    let isJson = false;
+    let parsed = null;
+    if (r.status >= 200 && r.status < 300 && r.body) {
+      try {
+        parsed = JSON.parse(r.body);
+        isJson = typeof parsed === 'object' && parsed !== null;
+      } catch { /* not JSON */ }
+    }
+    return { ...r, isJson, parsed };
+  });
 }
 
-export async function fetchBridgeTelemetry({ address, signal }) {
-  const url = bridgeDataUrl(address);
-  if (!url) throw new Error('No bridge address configured.');
+/**
+ * Pick the best endpoint from probe results.
+ * Prefers a 200 JSON response that looks like telemetry.
+ */
+export function pickBestEndpoint(probeResults) {
+  // Look for JSON responses with temperature-related keys
+  const tempKeywords = ['temp', 'sensor', 'probe', 'core', 'surface', 'ambient', 'prediction'];
+
+  const jsonHits = probeResults.filter((r) => r.isJson && r.status === 200);
+
+  // Score each hit by how many temperature-related keys it has
+  const scored = jsonHits.map((r) => {
+    const keys = Object.keys(r.parsed).join(' ').toLowerCase();
+    const score = tempKeywords.reduce((n, kw) => n + (keys.includes(kw) ? 1 : 0), 0);
+    return { ...r, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+
+  // Return the best match, or the first JSON hit, or null
+  return scored[0] ?? jsonHits[0] ?? null;
+}
+
+/**
+ * Fetch telemetry from a specific device path via the proxy.
+ */
+export async function fetchBridgeTelemetry({ address, path, signal }) {
+  const host = address.trim();
+  if (!host) throw new Error('No bridge address configured.');
+  if (!path) throw new Error('No bridge endpoint path configured.');
+
+  const url = `/api/bridge/get?host=${encodeURIComponent(host)}&path=${encodeURIComponent(path)}`;
 
   let response;
   try {
@@ -64,19 +121,16 @@ export async function fetchBridgeTelemetry({ address, signal }) {
   } catch (err) {
     throw new Error(
       `Network error reaching bridge proxy — make sure the server is running ` +
-      `and the Combustion accessory at ${address.trim()} is powered on.`
+      `and the Combustion accessory at ${host} is powered on.`
     );
   }
 
   if (!response.ok) {
-    // The proxy returns JSON { error: "..." } on failure
     let detail = `HTTP ${response.status}`;
     try {
       const body = await response.json();
       if (body?.error) {
-        detail = typeof body.error === 'string'
-          ? body.error
-          : JSON.stringify(body.error);
+        detail = typeof body.error === 'string' ? body.error : JSON.stringify(body.error);
       }
     } catch { /* use status code */ }
     throw new Error(`Bridge error: ${detail}`);

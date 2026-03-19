@@ -31,12 +31,16 @@ export default function ThermoBar({ thermo, accentColor }) {
     transport = THERMOMETER_TRANSPORT.BLUETOOTH,
     bridgeAddress,
     setBridgeAddress,
+    bridgePath,
+    setBridgePath,
+    probeResults,
     lastUpdateIso,
     setTransport,
   } = thermo;
 
   const [showWifiPanel, setShowWifiPanel] = useState(false);
   const [addressInput, setAddressInput] = useState(bridgeAddress ?? '');
+  const [pathInput, setPathInput] = useState(bridgePath ?? '');
 
   const isConnected = state === THERMOMETER_STATE.CONNECTED;
   const isUnsupported = state === THERMOMETER_STATE.UNSUPPORTED;
@@ -123,8 +127,8 @@ export default function ThermoBar({ thermo, accentColor }) {
         <div className="cloud-controls" onClick={(e) => e.stopPropagation()}>
           <div className="cloud-auth-heading">Combustion WiFi Bridge</div>
           <p style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
-            Enter the local IP or hostname of your Combustion WiFi Booster, Display,
-            or Giant Grill Gauge. Your phone and the bridge must be on the same WiFi network.
+            Enter the local IP or hostname of your Combustion WiFi accessory.
+            The app will probe the device to find its telemetry endpoint.
           </p>
           {errorMsg && (
             <div className="cloud-auth-error">{errorMsg}</div>
@@ -134,6 +138,7 @@ export default function ThermoBar({ thermo, accentColor }) {
             onSubmit={(e) => {
               e.preventDefault();
               setBridgeAddress?.(addressInput.trim());
+              if (pathInput.trim()) setBridgePath?.(pathInput.trim());
               connect();
             }}
           >
@@ -144,12 +149,62 @@ export default function ThermoBar({ thermo, accentColor }) {
               onChange={(e) => setAddressInput(e.target.value)}
               required
             />
+            <input
+              type="text"
+              placeholder="Endpoint path (auto-detected if blank)"
+              value={pathInput}
+              onChange={(e) => setPathInput(e.target.value)}
+              style={{ fontSize: 11 }}
+            />
             <button type="submit" disabled={state === THERMOMETER_STATE.CONNECTING}>
-              {state === THERMOMETER_STATE.CONNECTING ? 'Connecting…'
+              {state === THERMOMETER_STATE.CONNECTING ? 'Probing device…'
                 : isConnected ? 'Reconnect'
                 : 'Connect'}
             </button>
           </form>
+
+          {bridgePath && (
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+              Using endpoint: <strong>{bridgePath}</strong>
+            </div>
+          )}
+
+          {probeResults && !isConnected && (
+            <details style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+              <summary style={{ cursor: 'pointer' }}>
+                Probe results ({probeResults.filter((r) => r.status === 200).length}/{probeResults.length} responsive)
+              </summary>
+              <div style={{ marginTop: 4, maxHeight: 150, overflow: 'auto', lineHeight: 1.5 }}>
+                {probeResults.map((r, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 6 }}>
+                    <code style={{ minWidth: 140 }}>{r.path}</code>
+                    <span>
+                      {r.status === 200 && r.isJson ? '✅ JSON' :
+                       r.status === 200 ? `✅ ${r.contentType?.split(';')[0] || 'ok'}` :
+                       r.status > 0 ? `❌ ${r.status}` :
+                       `⚠️ ${r.error?.slice(0, 40) || 'timeout'}`}
+                    </span>
+                    {r.isJson && (
+                      <button
+                        type="button"
+                        style={{
+                          fontSize: 10, padding: '1px 6px', borderRadius: 4,
+                          border: '1px solid var(--border)', background: 'rgba(255,255,255,0.06)',
+                          color: 'var(--text-primary)', cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          setPathInput(r.path);
+                          setBridgePath?.(r.path);
+                        }}
+                      >
+                        Use
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
 
           {isConnected && (
             <div className="cloud-controls-footer">
