@@ -39,7 +39,7 @@ function combustionBridgeProxy() {
           res.end(body);
         } catch (err) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: err.message }));
+          res.end(JSON.stringify({ error: String(err?.message ?? err) }));
         }
       });
     },
