@@ -6,6 +6,8 @@ import CookingMethodScreen from './components/CookingMethodScreen';
 import CookScreen from './components/CookScreen';
 import RestScreen from './components/RestScreen';
 import useThermometer from './hooks/useThermometer';
+import useMeatNetCloud from './hooks/useMeatNetCloud';
+import { THERMOMETER_TRANSPORT } from './constants/thermometer';
 
 const SCREENS = {
   CATEGORY: 'category',
@@ -30,8 +32,24 @@ export default function App() {
   const [exiting, setExiting]       = useState(false);
   const [selection, setSelection]   = useState(DEFAULT_SELECTION);
   const [history, setHistory]       = useState([]);
+  const [transport, setTransport]   = useState(THERMOMETER_TRANSPORT.BLUETOOTH);
 
-  const thermo = useThermometer();
+  const bluetoothThermo = useThermometer();
+  const cloudThermo = useMeatNetCloud();
+
+  useEffect(() => {
+    if (transport === THERMOMETER_TRANSPORT.CLOUD) {
+      bluetoothThermo.disconnect();
+    } else {
+      cloudThermo.disconnect();
+    }
+  }, [transport]);
+
+  const thermo = {
+    ...(transport === THERMOMETER_TRANSPORT.CLOUD ? cloudThermo : bluetoothThermo),
+    transport,
+    setTransport,
+  };
 
   // Navigate forward
   const navigate = (nextScreen, updates = {}) => {

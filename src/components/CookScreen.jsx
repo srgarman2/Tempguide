@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover, formatTemp, getCookStatus } from '../utils/carryover';
-import { THERMOMETER_STATE } from '../hooks/useThermometer';
+import { THERMOMETER_STATE } from '../constants/thermometer';
 import useCookHistory from '../hooks/useCookHistory';
 import NavBar from './NavBar';
 import TempGauge from './TempGauge';

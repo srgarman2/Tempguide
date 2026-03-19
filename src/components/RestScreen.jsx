@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover } from '../utils/carryover';
-import { THERMOMETER_STATE } from '../hooks/useThermometer';
+import { THERMOMETER_STATE } from '../constants/thermometer';
 import useRestTimer from '../hooks/useRestTimer';
 import NavBar from './NavBar';
 import CarryoverChart from './CarryoverChart';
