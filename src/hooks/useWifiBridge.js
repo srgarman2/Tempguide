@@ -3,7 +3,6 @@ import { THERMOMETER_STATE, THERMOMETER_TRANSPORT } from '../constants/thermomet
 import {
   WIFI_BRIDGE_CONFIG,
   fetchBridgeTelemetry,
-  pingBridge,
   readStoredBridgeAddress,
   persistBridgeAddress,
 } from '../services/wifiBridge';
@@ -130,11 +129,6 @@ export default function useWifiBridge() {
       setState(THERMOMETER_STATE.CONNECTING);
       setErrorMsg(null);
       consecutiveErrors.current = 0;
-
-      const reachable = await pingBridge({ address: bridgeAddress });
-      if (!reachable) {
-        throw new Error(`Cannot reach bridge at ${bridgeAddress}. Check the address and that your device is on the same WiFi network.`);
-      }
 
       await pullOnce();
 
