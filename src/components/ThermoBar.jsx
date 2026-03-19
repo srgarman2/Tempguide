@@ -180,6 +180,12 @@ export default function ThermoBar({ thermo, accentColor }) {
               }}
             >
               <div className="cloud-auth-heading">MeatNet Cloud sign-in</div>
+              <p style={{ fontSize: 11, color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                Uses your MeatNet Cloud account (separate from the Combustion store).
+              </p>
+              {errorMsg && (
+                <div className="cloud-auth-error">{errorMsg}</div>
+              )}
               <input
                 type="email"
                 placeholder="Email"
@@ -204,6 +210,10 @@ export default function ThermoBar({ thermo, accentColor }) {
                 )}
               </div>
             </form>
+          )}
+
+          {isAuthenticated && errorMsg && (
+            <div className="cloud-auth-error">{errorMsg}</div>
           )}
 
           {isAuthenticated && (

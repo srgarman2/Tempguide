@@ -217,13 +217,19 @@ export default function useMeatNetCloud() {
       persistSession(nextSession);
       setAuthState('authenticated');
       setState(THERMOMETER_STATE.DISCONNECTED);
-      await loadBridgeDevices();
-      return true;
     } catch (err) {
       setAuthState('error');
       setErrorMsg(err.message ?? 'Unable to sign in to MeatNet Cloud.');
       return false;
     }
+
+    // Bridge loading is non-fatal — don't roll back a successful login
+    try {
+      await loadBridgeDevices();
+    } catch {
+      // Errors will surface when user starts streaming
+    }
+    return true;
   }, [loadBridgeDevices]);
 
   const beginOauthLogin = useCallback((provider) => {
@@ -256,15 +262,21 @@ export default function useMeatNetCloud() {
       setAuthState('authenticated');
       setState(THERMOMETER_STATE.DISCONNECTED);
       setErrorMsg(null);
-      await loadBridgeDevices();
     } catch (err) {
       setAuthState('error');
       setErrorMsg(err.message ?? 'OAuth sign-in failed.');
-    } finally {
-      currentUrl.searchParams.delete('code');
-      currentUrl.searchParams.delete('provider');
-      window.history.replaceState({}, '', currentUrl.toString());
     }
+
+    // Bridge loading is non-fatal after successful OAuth
+    try {
+      await loadBridgeDevices();
+    } catch {
+      // Errors will surface when user starts streaming
+    }
+
+    currentUrl.searchParams.delete('code');
+    currentUrl.searchParams.delete('provider');
+    window.history.replaceState({}, '', currentUrl.toString());
   }, [loadBridgeDevices]);
 
   const connect = useCallback(async () => {
