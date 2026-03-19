@@ -6,7 +6,7 @@ import CookingMethodScreen from './components/CookingMethodScreen';
 import CookScreen from './components/CookScreen';
 import RestScreen from './components/RestScreen';
 import useThermometer from './hooks/useThermometer';
-import useMeatNetCloud from './hooks/useMeatNetCloud';
+import useWifiBridge from './hooks/useWifiBridge';
 import { THERMOMETER_TRANSPORT } from './constants/thermometer';
 
 const SCREENS = {
@@ -35,18 +35,18 @@ export default function App() {
   const [transport, setTransport]   = useState(THERMOMETER_TRANSPORT.BLUETOOTH);
 
   const bluetoothThermo = useThermometer();
-  const cloudThermo = useMeatNetCloud();
+  const wifiThermo = useWifiBridge();
 
   useEffect(() => {
-    if (transport === THERMOMETER_TRANSPORT.CLOUD) {
+    if (transport === THERMOMETER_TRANSPORT.WIFI) {
       bluetoothThermo.disconnect();
     } else {
-      cloudThermo.disconnect();
+      wifiThermo.disconnect();
     }
   }, [transport]);
 
   const thermo = {
-    ...(transport === THERMOMETER_TRANSPORT.CLOUD ? cloudThermo : bluetoothThermo),
+    ...(transport === THERMOMETER_TRANSPORT.WIFI ? wifiThermo : bluetoothThermo),
     transport,
     setTransport,
   };
