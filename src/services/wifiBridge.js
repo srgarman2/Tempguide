@@ -5,18 +5,15 @@
  * on the local network. The accessory handles BLE↔WiFi bridging — no cloud,
  * no auth, no Bluetooth range issues. Any device on the same WiFi can poll.
  *
- * In development, requests are proxied through the Vite dev server
- * (/api/bridge/data?host=<ip>) to avoid browser CORS restrictions.
- * In production, the app fetches directly from http://<ip>/data — which
- * requires the Combustion device to return CORS headers, or the app to be
- * served from the same origin / behind a reverse proxy.
+ * All bridge requests go through a same-origin proxy at /api/bridge/* to avoid
+ * browser CORS and mixed-content restrictions. In dev mode, the Vite plugin
+ * handles the proxy; in production, server.js handles it.
  *
  * Environment overrides:
  *   VITE_WIFI_BRIDGE_POLL_MS — polling interval in ms (default 2000)
  */
 
 const DEFAULT_POLL_MS = 2000;
-const IS_DEV = import.meta.env.DEV;
 
 export const WIFI_BRIDGE_CONFIG = {
   pollMs: Number(import.meta.env.VITE_WIFI_BRIDGE_POLL_MS ?? DEFAULT_POLL_MS),
@@ -46,20 +43,12 @@ export function persistBridgeAddress(address) {
 
 /**
  * Build the URL to fetch bridge telemetry.
- * Dev  → /api/bridge/data?host=192.168.0.145  (same-origin, proxied by Vite)
- * Prod → http://192.168.0.145/data             (direct, needs CORS headers)
+ * Always uses the same-origin proxy: /api/bridge/data?host=<ip>
  */
 function bridgeDataUrl(address) {
   const host = address.trim();
   if (!host) return '';
-
-  if (IS_DEV) {
-    return `/api/bridge/data?host=${encodeURIComponent(host)}`;
-  }
-
-  let base = host;
-  if (!/^https?:\/\//i.test(base)) base = `http://${base}`;
-  return `${base.replace(/\/+$/, '')}/data`;
+  return `/api/bridge/data?host=${encodeURIComponent(host)}`;
 }
 
 export async function fetchBridgeTelemetry({ address, signal }) {
@@ -73,27 +62,20 @@ export async function fetchBridgeTelemetry({ address, signal }) {
       headers: { Accept: 'application/json' },
     });
   } catch (err) {
-    // Distinguish CORS / mixed-content from genuine network errors
-    if (err instanceof TypeError) {
-      const onHttps = globalThis.location?.protocol === 'https:';
-      if (onHttps) {
-        throw new Error(
-          `Mixed-content blocked: this page is served over HTTPS but the ` +
-          `bridge is on plain HTTP. Open the app over HTTP instead, or ` +
-          `place a reverse proxy in front of the bridge.`
-        );
-      }
-      throw new Error(
-        `Network error reaching ${address} — this is usually caused by ` +
-        `CORS restrictions. Make sure the Combustion accessory is powered on ` +
-        `and reachable at http://${address.trim()}/data.`
-      );
-    }
-    throw err;
+    throw new Error(
+      `Network error reaching bridge proxy — make sure the server is running ` +
+      `and the Combustion accessory at ${address.trim()} is powered on.`
+    );
   }
 
   if (!response.ok) {
-    throw new Error(`Bridge responded with HTTP ${response.status}`);
+    // The proxy returns JSON { error: "..." } on failure
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (body?.error) detail = body.error;
+    } catch { /* use status code */ }
+    throw new Error(`Bridge error: ${detail}`);
   }
 
   return response.json();
