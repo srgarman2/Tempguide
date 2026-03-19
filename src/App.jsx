@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import CategoryScreen from './components/CategoryScreen';
 import ItemScreen from './components/ItemScreen';
 import DonenessScreen from './components/DonenessScreen';
@@ -6,8 +6,6 @@ import CookingMethodScreen from './components/CookingMethodScreen';
 import CookScreen from './components/CookScreen';
 import RestScreen from './components/RestScreen';
 import useThermometer from './hooks/useThermometer';
-import useWifiBridge from './hooks/useWifiBridge';
-import { THERMOMETER_TRANSPORT } from './constants/thermometer';
 
 const SCREENS = {
   CATEGORY: 'category',
@@ -32,24 +30,7 @@ export default function App() {
   const [exiting, setExiting]       = useState(false);
   const [selection, setSelection]   = useState(DEFAULT_SELECTION);
   const [history, setHistory]       = useState([]);
-  const [transport, setTransport]   = useState(THERMOMETER_TRANSPORT.BLUETOOTH);
-
-  const bluetoothThermo = useThermometer();
-  const wifiThermo = useWifiBridge();
-
-  useEffect(() => {
-    if (transport === THERMOMETER_TRANSPORT.WIFI) {
-      bluetoothThermo.disconnect();
-    } else {
-      wifiThermo.disconnect();
-    }
-  }, [transport]);
-
-  const thermo = {
-    ...(transport === THERMOMETER_TRANSPORT.WIFI ? wifiThermo : bluetoothThermo),
-    transport,
-    setTransport,
-  };
+  const thermo = useThermometer();
 
   // Navigate forward
   const navigate = (nextScreen, updates = {}) => {

@@ -29,7 +29,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { cToF } from '../utils/carryover';
-import { THERMOMETER_STATE, THERMOMETER_TRANSPORT } from '../constants/thermometer';
+import { THERMOMETER_STATE } from '../constants/thermometer';
 
 // ── Combustion Inc. BLE constants ───────────────────────────────────────────
 const COMBUSTION_VENDOR_ID    = 0x09C7;
@@ -336,7 +336,6 @@ export default function useThermometer() {
   }, [disconnect]);
 
   return {
-    transport: THERMOMETER_TRANSPORT.BLUETOOTH,
     state,
     sensors,              // number[] | null — [T1] in Instant Read, all 8 in Normal mode
     coreTemp,             // number | null — temp at virtualCoreIndex (probe-identified thermal center)

@@ -7,8 +7,3 @@ export const THERMOMETER_STATE = {
   ERROR: 'error',
   UNSUPPORTED: 'unsupported',
 };
-
-export const THERMOMETER_TRANSPORT = {
-  BLUETOOTH: 'bluetooth',
-  WIFI: 'wifi',
-};
