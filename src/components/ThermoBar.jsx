@@ -12,17 +12,13 @@ const STATE_LABEL = {
 
 export default function ThermoBar({ thermo, accentColor }) {
   const {
-    state,
-    coreTemp,
-    deviceName,
-    batteryOk,
-    errorMsg,
-    connect,
-    disconnect,
+    state, coreTemp, deviceName, batteryOk, errorMsg,
+    gaugeAmbientTemp, connectedVia,
+    connect, disconnect,
   } = thermo;
-
-  const isConnected = state === THERMOMETER_STATE.CONNECTED;
+  const isConnected   = state === THERMOMETER_STATE.CONNECTED;
   const isUnsupported = state === THERMOMETER_STATE.UNSUPPORTED;
+  const isGGG         = isConnected && connectedVia === 'node';
 
   const handleClick = () => {
     if (isConnected) {
@@ -53,13 +49,24 @@ export default function ThermoBar({ thermo, accentColor }) {
         {isConnected && deviceName
           ? deviceName
           : STATE_LABEL[state] ?? 'Thermometer'}
+        {isGGG && <span className="thermo-via-label"> · via GGG</span>}
         {!batteryOk && isConnected && ' · low battery'}
       </span>
+
+      {/* Probe core temperature */}
       {isConnected && coreTemp != null && (
         <span className="thermo-temp" style={{ color: accentColor }}>
           {coreTemp.toFixed(1)}°F
         </span>
       )}
+
+      {/* GGG grill ambient RTD — only shown when connected through a node */}
+      {isGGG && gaugeAmbientTemp != null && (
+        <span className="thermo-grill-temp" title="Grill/smoker chamber temperature (GGG RTD sensor)">
+          🌡 {gaugeAmbientTemp.toFixed(0)}°F
+        </span>
+      )}
+
       {!isConnected && !isUnsupported && (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}>
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
