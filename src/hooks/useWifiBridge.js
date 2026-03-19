@@ -139,15 +139,13 @@ export default function useWifiBridge() {
           if (consecutiveErrors.current >= 5) {
             stopPolling();
             setState(THERMOMETER_STATE.ERROR);
-            setErrorMsg(`Lost connection to bridge: ${err?.message ?? String(err)}`);
+            setErrorMsg(`Lost connection to bridge: ${err.message}`);
           }
         });
       }, WIFI_BRIDGE_CONFIG.pollMs);
     } catch (err) {
       setState(THERMOMETER_STATE.ERROR);
-      const msg = typeof err === 'string' ? err
-        : err?.message ?? 'Failed to connect to WiFi bridge.';
-      setErrorMsg(String(msg));
+      setErrorMsg(err.message ?? 'Failed to connect to WiFi bridge.');
     }
   }, [bridgeAddress, pullOnce, stopPolling]);
 

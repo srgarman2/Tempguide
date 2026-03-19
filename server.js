@@ -61,7 +61,7 @@ async function handleBridgeProxy(req, res) {
     res.end(body);
   } catch (err) {
     res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: String(err?.message ?? err) }));
+    res.end(JSON.stringify({ error: String(err?.message || err) }));
   }
 }
 

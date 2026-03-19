@@ -74,15 +74,13 @@ export async function fetchBridgeTelemetry({ address, signal }) {
     try {
       const body = await response.json();
       if (body?.error) {
-        detail = typeof body.error === 'string' ? body.error : JSON.stringify(body.error);
+        detail = typeof body.error === 'string'
+          ? body.error
+          : JSON.stringify(body.error);
       }
     } catch { /* use status code */ }
     throw new Error(`Bridge error: ${detail}`);
   }
 
-  const data = await response.json();
-  if (data == null || typeof data !== 'object') {
-    throw new Error('Bridge returned unexpected data (not JSON).');
-  }
-  return data;
+  return response.json();
 }
