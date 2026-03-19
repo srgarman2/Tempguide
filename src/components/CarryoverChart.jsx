@@ -1,6 +1,11 @@
 /**
  * SVG sparkline chart showing predicted carryover temperature profile
  * over the rest period. Displays pull temp baseline, peak, and target zone.
+ *
+ * When live probe data is available during rest, the chart shows:
+ *   - Solid green line: actual measured core temp history
+ *   - Accent line: predicted future from latest FD assimilation
+ *   - Faded dashed line: original (pre-assimilation) prediction for comparison
  */
 
 const W = 320;
@@ -15,15 +20,32 @@ export default function CarryoverChart({
   currentMinute = 0,
   accentColor = '#c41e3a',
   restMinutes = 10,
+  // ── Live assimilation props (optional) ──────────────────────────────
+  actualHistory = null,        // [{minute, tempF}] — measured core readings
+  initialProfile = null,       // original pre-assimilation prediction (for comparison)
+  assimilationMinute = null,   // where actual data ends and prediction begins
 }) {
   if (!profile || profile.length < 2) return null;
+
+  const hasActual = actualHistory != null && actualHistory.length >= 2;
 
   // Display up to 30 minutes or restMinutes+15, whichever is larger
   const displayMinutes = Math.max(restMinutes + 10, 20);
   const visibleProfile = profile.filter(p => p.minute <= displayMinutes);
+  const visibleInitial = initialProfile
+    ? initialProfile.filter(p => p.minute <= displayMinutes)
+    : null;
+  const visibleActual = hasActual
+    ? actualHistory.filter(p => p.minute <= displayMinutes)
+    : null;
 
-  const tempMin = Math.min(pullTempF - 5, ...visibleProfile.map(p => p.tempF));
-  const tempMax = Math.max(peakTempF + 5, endTempF + 3, ...visibleProfile.map(p => p.tempF));
+  const allTemps = [
+    ...visibleProfile.map(p => p.tempF),
+    ...(visibleActual ? visibleActual.map(p => p.tempF) : []),
+    ...(visibleInitial ? visibleInitial.map(p => p.tempF) : []),
+  ];
+  const tempMin = Math.min(pullTempF - 5, ...allTemps);
+  const tempMax = Math.max(peakTempF + 5, endTempF + 3, ...allTemps);
   const tempRange = tempMax - tempMin;
 
   const innerW = W - PAD.left - PAD.right;
@@ -32,20 +54,49 @@ export default function CarryoverChart({
   const xScale = (minute) => PAD.left + (minute / displayMinutes) * innerW;
   const yScale = (temp) => PAD.top + innerH - ((temp - tempMin) / tempRange) * innerH;
 
-  // Build SVG path
-  const pathD = visibleProfile
-    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(p.minute).toFixed(1)} ${yScale(p.tempF).toFixed(1)}`)
-    .join(' ');
+  // Build SVG path from points
+  const buildPath = (points) =>
+    points
+      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(p.minute).toFixed(1)} ${yScale(p.tempF).toFixed(1)}`)
+      .join(' ');
 
-  // Fill area
-  const fillD = pathD
-    + ` L ${xScale(visibleProfile[visibleProfile.length - 1].minute).toFixed(1)} ${yScale(tempMin).toFixed(1)}`
+  // ── Main prediction curve ───────────────────────────────────────────
+  // When assimilating, only draw the future portion (after assimilationMinute).
+  // Otherwise draw the full profile.
+  const futureProfile = hasActual && assimilationMinute != null
+    ? visibleProfile.filter(p => p.minute >= assimilationMinute - 0.2)
+    : visibleProfile;
+  const pathD = buildPath(futureProfile);
+
+  // Fill area under the full merged curve
+  const fullMergedPoints = hasActual && visibleActual
+    ? [...visibleActual, ...visibleProfile.filter(p => p.minute > (visibleActual[visibleActual.length - 1]?.minute ?? 0))]
+    : visibleProfile;
+  const fullPathD = buildPath(fullMergedPoints);
+  const fillD = fullPathD
+    + ` L ${xScale(fullMergedPoints[fullMergedPoints.length - 1].minute).toFixed(1)} ${yScale(tempMin).toFixed(1)}`
     + ` L ${PAD.left} ${yScale(tempMin).toFixed(1)} Z`;
+
+  // ── Actual history path (green) ─────────────────────────────────────
+  const actualPathD = visibleActual ? buildPath(visibleActual) : null;
+
+  // ── Initial prediction path (faded dashed) ──────────────────────────
+  const initialPathD = visibleInitial && visibleInitial.length >= 2
+    ? buildPath(visibleInitial)
+    : null;
 
   // Current time marker
   const currentX = xScale(Math.min(currentMinute, displayMinutes));
   const currentProfile = visibleProfile.find(p => p.minute >= Math.floor(currentMinute));
-  const currentY = currentProfile ? yScale(currentProfile.tempF) : null;
+  // Prefer actual temp for the dot position when available
+  const currentActual = visibleActual && visibleActual.length > 0
+    ? visibleActual[visibleActual.length - 1]
+    : null;
+  const currentY = currentActual
+    ? yScale(currentActual.tempF)
+    : currentProfile
+      ? yScale(currentProfile.tempF)
+      : null;
 
   // Temp reference lines
   const pullY  = yScale(pullTempF);
@@ -98,7 +149,20 @@ export default function CarryoverChart({
         {/* Fill */}
         <path d={fillD} fill="url(#chartFill)" clipPath="url(#chartClip)" />
 
-        {/* Main curve */}
+        {/* ── Initial prediction (faded dashed, only when assimilating) ── */}
+        {initialPathD && (
+          <path
+            d={initialPathD}
+            fill="none"
+            stroke="rgba(255,255,255,0.15)"
+            strokeWidth="1.5"
+            strokeDasharray="4,3"
+            strokeLinecap="round"
+            clipPath="url(#chartClip)"
+          />
+        )}
+
+        {/* ── Main prediction curve (future portion) ───────────────────── */}
         <path
           d={pathD}
           fill="none"
@@ -107,7 +171,21 @@ export default function CarryoverChart({
           strokeLinecap="round"
           strokeLinejoin="round"
           clipPath="url(#chartClip)"
+          {...(hasActual ? { strokeDasharray: '6,3' } : {})}
         />
+
+        {/* ── Actual measured history (solid green) ────────────────────── */}
+        {actualPathD && (
+          <path
+            d={actualPathD}
+            fill="none"
+            stroke="#4cde80"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            clipPath="url(#chartClip)"
+          />
+        )}
 
         {/* Current time vertical line */}
         {currentMinute > 0 && (
@@ -119,14 +197,14 @@ export default function CarryoverChart({
           />
         )}
 
-        {/* Current temp dot */}
+        {/* Current temp dot — green when live, white when estimated */}
         {currentY != null && currentMinute > 0 && (
           <circle
             cx={currentX}
             cy={currentY}
             r={4}
-            fill="white"
-            stroke={accentColor}
+            fill={hasActual ? '#4cde80' : 'white'}
+            stroke={hasActual ? 'white' : accentColor}
             strokeWidth="2"
           />
         )}

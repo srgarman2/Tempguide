@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover } from '../utils/carryover';
+import { THERMOMETER_STATE } from '../hooks/useThermometer';
 import useRestTimer from '../hooks/useRestTimer';
 import NavBar from './NavBar';
 import CarryoverChart from './CarryoverChart';
@@ -58,6 +59,11 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
 
   const hasSensorGradient = sensorGradientF != null && sensorGradientF.length >= 2;
 
+  // ── Live probe state during rest ────────────────────────────────────
+  const isConnected = thermo.state === THERMOMETER_STATE.CONNECTED;
+  const hasLiveGradient = isConnected && !thermo.isInstantRead
+    && thermo.sensors?.length >= 2 && thermo.virtualSurfaceIndex != null;
+
   const timer = useRestTimer({
     methodId: selection.methodId,
     pullTempF,
@@ -69,6 +75,13 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     actualSurfaceTempF: selection.actualSurfaceTempF ?? null,
     ambientTempF: selection.actualAmbientTempF ?? 72,
     sensorGradientF,
+    // ── Live probe data for assimilation ──────────────────────────────
+    liveCoreTemp:            isConnected ? thermo.coreTemp : null,
+    liveSensors:             hasLiveGradient ? thermo.sensors : null,
+    liveVirtualCoreIndex:    hasLiveGradient ? thermo.virtualCoreIndex : null,
+    liveVirtualSurfaceIndex: hasLiveGradient ? thermo.virtualSurfaceIndex : null,
+    liveAmbientTempF:        isConnected ? thermo.ambientTemp : null,
+    isProbeConnected:        hasLiveGradient,
     onComplete: () => {},
   });
 
@@ -216,7 +229,10 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <span className="cook-card-value" style={{
             color: timer.hasReachedTarget ? '#4cde80' : '#f5a623',
           }}>
-            ~{timer.estimatedCurrentTempF}°F
+            {timer.isLiveTemp ? '' : '~'}{timer.estimatedCurrentTempF}°F
+            {timer.isLiveTemp && (
+              <span style={{ fontSize: 10, marginLeft: 4, color: '#4cde80' }}>🌡 live</span>
+            )}
           </span>
         </div>
 
@@ -246,8 +262,12 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
 
         {/* Core tracking rows */}
         <div className="carryover-row">
-          <span className="label">Est. core temp</span>
-          <span className="val" style={{ color: '#f5a623' }}>~{timer.estimatedCurrentTempF}°F</span>
+          <span className="label">
+            {timer.isLiveTemp ? '🌡 Core temp (live)' : 'Est. core temp'}
+          </span>
+          <span className="val" style={{ color: timer.isLiveTemp ? '#4cde80' : '#f5a623' }}>
+            {timer.isLiveTemp ? '' : '~'}{timer.estimatedCurrentTempF}°F
+          </span>
         </div>
         <div className="carryover-row">
           <span className="label">
@@ -267,7 +287,9 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
         </div>
         {timer.isRunning && (
           <div className="carryover-row">
-            <span className="label">Temp slope</span>
+            <span className="label">
+              Temp slope {timer.isLiveTemp ? '🌡' : ''}
+            </span>
             <span className="val" style={{
               color: timer.tempSlopePerMin > 0 ? '#f5a623' : timer.tempSlopePerMin < 0 ? '#66bbff' : 'var(--text-primary)',
             }}>
@@ -300,19 +322,29 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <span style={{
             fontSize: 10, fontWeight: 700, letterSpacing: '0.05em',
             padding: '2px 7px', borderRadius: 20,
-            background: hasSensorGradient
+            background: timer.isAssimilating
               ? 'rgba(102,187,255,0.12)'
-              : hasMeasuredData
-                ? 'rgba(76,222,128,0.12)'
-                : 'rgba(255,255,255,0.06)',
-            border: `1px solid ${hasSensorGradient
+              : hasSensorGradient
+                ? 'rgba(102,187,255,0.12)'
+                : hasMeasuredData
+                  ? 'rgba(76,222,128,0.12)'
+                  : 'rgba(255,255,255,0.06)',
+            border: `1px solid ${timer.isAssimilating
               ? 'rgba(102,187,255,0.35)'
-              : hasMeasuredData
-                ? 'rgba(76,222,128,0.35)'
-                : 'rgba(255,255,255,0.12)'}`,
-            color: hasSensorGradient ? '#66bbff' : hasMeasuredData ? '#4cde80' : 'var(--text-tertiary)',
+              : hasSensorGradient
+                ? 'rgba(102,187,255,0.35)'
+                : hasMeasuredData
+                  ? 'rgba(76,222,128,0.35)'
+                  : 'rgba(255,255,255,0.12)'}`,
+            color: timer.isAssimilating ? '#66bbff' : hasSensorGradient ? '#66bbff' : hasMeasuredData ? '#4cde80' : 'var(--text-tertiary)',
           }}>
-            {hasSensorGradient ? '🔬 Finite Diff' : hasMeasuredData ? '🌡 Measured' : 'Modeled'}
+            {timer.isAssimilating
+              ? `🔄 Live ×${timer.assimilationCount}`
+              : hasSensorGradient
+                ? '🔬 Finite Diff'
+                : hasMeasuredData
+                  ? '🌡 Measured'
+                  : 'Modeled'}
           </span>
         </div>
 
@@ -434,6 +466,9 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
         currentMinute={timer.elapsedMin}
         accentColor={category.accentColor}
         restMinutes={restMinutes}
+        actualHistory={timer.liveHistory}
+        initialProfile={timer.isAssimilating ? timer.initialCarryover.restProfile : null}
+        assimilationMinute={timer.isAssimilating ? timer.elapsedMin : null}
       />
 
       {/* Notes */}
