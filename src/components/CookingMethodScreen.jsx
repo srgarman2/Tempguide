@@ -28,8 +28,12 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
     ? (doneness.pullTemp != null && typeof doneness.pullTemp === 'object' ? doneness.pullTemp.min : doneness.pullTemp) ?? 125
     : item.pullTemp ?? 140;
 
+  // Use per-item compatibleMethods when defined (more granular),
+  // fall back to category-level filter for any items that don't list them.
   const availableMethods = COOKING_METHODS.filter(m =>
-    m.compatibleCategories.includes(selection.categoryId)
+    item.compatibleMethods
+      ? item.compatibleMethods.includes(m.id)
+      : m.compatibleCategories.includes(selection.categoryId)
   );
 
   const handleProceed = (methodId) => {
@@ -47,8 +51,8 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
         <p>Affects pull temp via carryover physics</p>
       </div>
 
-      {/* Thickness selector — relevant for carryover */}
-      {item.hasDoneness && (
+      {/* Thickness selector — relevant for carryover. Shown for all proteins; not shown for baked goods */}
+      {selection.categoryId !== 'baked' && (
         <div className="thickness-section">
           <h4>Thickness</h4>
           <div className="thickness-slider">

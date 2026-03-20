@@ -10,6 +10,10 @@ import CookChart from './CookChart';
 
 export default function CookScreen({ selection, thermo, navigate, goBack, SCREENS }) {
   const [manualTemp, setManualTemp] = useState('');
+  // Custom target temperature override — null means use the recommendation from data
+  const [customEndTemp, setCustomEndTemp] = useState(null);
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [targetInputVal, setTargetInputVal] = useState('');
 
   // Hooks must be called before any early return (React rules of hooks).
   // Compute temp values inline so useCookHistory is always called.
@@ -50,11 +54,16 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     return item.endTemp ?? item.pullTemp;
   })();
 
-  const endTempDisplay = doneness
-    ? (doneness.endTemp != null && typeof doneness.endTemp === 'object'
-        ? `${doneness.endTemp.min}–${doneness.endTemp.max}°F`
-        : `${doneness.endTemp ?? doneness.sousVideTemp ?? '—'}°F`)
-    : formatTemp(Array.isArray(item.endTempRange) ? item.endTempRange : (item.endTemp ?? item.pullTemp));
+  // User-overridable target — falls back to data recommendation
+  const effectiveEndTemp = customEndTemp ?? rawEndTemp;
+
+  const endTempDisplay = customEndTemp != null
+    ? `${customEndTemp}°F`
+    : (doneness
+        ? (doneness.endTemp != null && typeof doneness.endTemp === 'object'
+            ? `${doneness.endTemp.min}–${doneness.endTemp.max}°F`
+            : `${doneness.endTemp ?? doneness.sousVideTemp ?? '—'}°F`)
+        : formatTemp(Array.isArray(item.endTempRange) ? item.endTempRange : (item.endTemp ?? item.pullTemp)));
 
   // Resolve rest time: doneness level takes priority over item level
   const restMinutes = isBasting
@@ -70,7 +79,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     if (method.id === 'sous-vide') {
       return estimateCarryover({
         methodId: selection.methodId,
-        pullTempF: rawEndTemp ?? 125,
+        pullTempF: effectiveEndTemp ?? 125,
         thicknessInches: selection.thicknessInches,
         restMinutes: Math.max(restMinutes, 4),
         categoryId: selection.categoryId,
@@ -85,7 +94,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       categoryId: selection.categoryId,
       ambientTempF,
     });
-    const adjustedPull = rawEndTemp != null ? Math.round(rawEndTemp - deltaF) : (rawPullTemp ?? 125);
+    const adjustedPull = effectiveEndTemp != null ? Math.round(effectiveEndTemp - deltaF) : (rawPullTemp ?? 125);
     return estimateCarryover({
       methodId: selection.methodId,
       pullTempF: adjustedPull,
@@ -94,12 +103,12 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       categoryId: selection.categoryId,
       ambientTempF,
     });
-  }, [selection.methodId, selection.categoryId, rawPullTemp, rawEndTemp, selection.thicknessInches, restMinutes, method.id, ambientTempF]);
+  }, [selection.methodId, selection.categoryId, rawPullTemp, effectiveEndTemp, selection.thicknessInches, restMinutes, method.id, ambientTempF]);
 
   // For sous vide: pull = bath = target. For others: pull = endTemp − carryover.
   const displayPullTemp = method.id === 'sous-vide'
-    ? (doneness?.sousVideTemp ?? rawEndTemp)
-    : rawEndTemp != null ? Math.round(rawEndTemp - co.deltaF) : rawPullTemp;
+    ? (doneness?.sousVideTemp ?? effectiveEndTemp)
+    : effectiveEndTemp != null ? Math.round(effectiveEndTemp - co.deltaF) : rawPullTemp;
 
   // Resolve endTempRange for chart target zone band
   const rawEndTempRange = doneness
@@ -108,7 +117,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         : null)
     : (Array.isArray(item.endTempRange) ? item.endTempRange : null);
 
-  const status = getCookStatus(currentTemp, displayPullTemp, rawEndTemp);
+  const status = getCookStatus(currentTemp, displayPullTemp, effectiveEndTemp);
   const shouldPull = currentTemp !== null && currentTemp >= displayPullTemp;
 
   // ── "If pulled now" live preview ────────────────────────────────────────
@@ -146,7 +155,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     });
 
     const projectedPeak   = Math.round((currentTemp + preview.deltaF) * 10) / 10;
-    const deltaFromTarget = rawEndTemp != null ? Math.round((projectedPeak - rawEndTemp) * 10) / 10 : null;
+    const deltaFromTarget = effectiveEndTemp != null ? Math.round((projectedPeak - effectiveEndTemp) * 10) / 10 : null;
     const surfaceSource   = liveGradient   != null ? 'finite-diff'
                           : liveSurfaceTemp != null ? 'measured'
                           : 'modeled';
@@ -168,7 +177,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     return { preview, projectedPeak, deltaFromTarget, verdict, verdictColor, verdictIcon, surfaceSource, liveSurfaceTemp, liveGradient };
   }, [
     method.id, currentTemp, selection.methodId, selection.categoryId,
-    selection.thicknessInches, restMinutes, rawEndTemp,
+    selection.thicknessInches, restMinutes, effectiveEndTemp,
     thermo.surfaceTemp, thermo.sensors, thermo.virtualCoreIndex,
     thermo.virtualSurfaceIndex, thermo.isInstantRead, isConnected, ambientTempF,
   ]);
@@ -263,7 +272,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         currentCoreTemp={currentTemp}
         currentMinute={cookHistory.elapsedMin}
         pullTempF={displayPullTemp}
-        endTempF={rawEndTemp}
+        endTempF={effectiveEndTemp}
         endTempRange={rawEndTempRange}
         accentColor={category.accentColor}
       />
@@ -273,7 +282,59 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         <div className="cook-card">
           <div className="cook-card-header">
             <span className="cook-card-title">Target Final Temperature</span>
-            <span className="cook-card-value">{endTempDisplay}</span>
+            {editingTarget ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="number"
+                  value={targetInputVal}
+                  autoFocus
+                  onChange={e => setTargetInputVal(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      const parsed = parseFloat(targetInputVal);
+                      if (!isNaN(parsed) && parsed > 32 && parsed < 600) setCustomEndTemp(Math.round(parsed));
+                      setEditingTarget(false);
+                    } else if (e.key === 'Escape') {
+                      setEditingTarget(false);
+                    }
+                  }}
+                  onBlur={() => {
+                    const parsed = parseFloat(targetInputVal);
+                    if (!isNaN(parsed) && parsed > 32 && parsed < 600) setCustomEndTemp(Math.round(parsed));
+                    setEditingTarget(false);
+                  }}
+                  style={{
+                    width: 64, background: 'rgba(255,255,255,0.08)', border: '1px solid var(--accent)',
+                    borderRadius: 6, color: 'inherit', fontSize: 16, fontWeight: 700,
+                    padding: '2px 6px', textAlign: 'right',
+                  }}
+                />
+                <span style={{ fontSize: 16, fontWeight: 700 }}>°F</span>
+              </span>
+            ) : (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="cook-card-value">{endTempDisplay}</span>
+                <button
+                  onClick={() => { setTargetInputVal(customEndTemp ?? rawEndTemp ?? ''); setEditingTarget(true); }}
+                  title="Edit target temperature"
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                    color: 'var(--text-tertiary)', fontSize: 13, lineHeight: 1, opacity: 0.7,
+                  }}
+                >✏️</button>
+                {customEndTemp != null && (
+                  <button
+                    onClick={() => setCustomEndTemp(null)}
+                    title="Reset to recommendation"
+                    style={{
+                      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
+                      borderRadius: 4, cursor: 'pointer', padding: '1px 6px',
+                      color: 'var(--text-tertiary)', fontSize: 10, lineHeight: '18px',
+                    }}
+                  >reset</button>
+                )}
+              </span>
+            )}
           </div>
           {doneness?.notes && (
             <p style={{ fontSize: 12, color: 'rgba(240,240,240,0.5)', marginTop: 4, lineHeight: 1.5 }}>
@@ -380,7 +441,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
             </div>
 
             {/* Detail rows */}
-            {rawEndTemp != null && (
+            {effectiveEndTemp != null && (
               <div className="carryover-row">
                 <span className="label">vs Target final</span>
                 <span className="val" style={{ color: pullNowPreview.verdictColor }}>
