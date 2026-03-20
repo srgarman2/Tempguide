@@ -54,7 +54,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
       {/* Thickness selector — relevant for carryover. Shown for all proteins; not shown for baked goods */}
       {selection.categoryId !== 'baked' && (
         <div className="thickness-section">
-          <h4>Thickness</h4>
+          <h4>{item.thicknessLabel ?? 'Thickness'}</h4>
           <div className="thickness-slider">
             <div className="thickness-value">{thickness.toFixed(1)}"</div>
             <input
@@ -108,7 +108,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
               <div className="method-carryover">
                 {method.appliesCarryover
                   ? <>Carryover: <strong>+{co.deltaF}°F</strong></>
-                  : <>Bath = target • No carryover</>
+                  : <>{method.noCarryoverLabel ?? 'Bath = target • No carryover'}</>
                 }
                 {method.usesBastingPullTemps && (
                   <> · <span style={{ color: 'rgba(255,180,80,0.8)' }}>Special pull temps</span></>

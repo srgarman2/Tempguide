@@ -36,6 +36,11 @@ import { simulateCarryover } from './heatSim';
 // Thermal diffusivity of beef/pork/poultry ≈ 1.36e-7 m²/s
 const ALPHA = 1.36e-7;
 
+// Thermal diffusivity of raw potato flesh ≈ 1.40e-7 m²/s
+// Slightly higher than muscle due to the starch-water matrix.
+// Source: food science literature; Califano & Calvelo (1991), Rahman (2009)
+const ALPHA_POTATO = 1.4e-7;
+
 /**
  * Estimated surface temperature at moment of removal from heat source.
  * This drives the inward heat flux during rest.
@@ -59,6 +64,7 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
   //   low-slow 1"  → ~3–4°F  (minimal: "pull at or near target")
   //   sous-vide    → ~1–2°F  (bath = target, just plating heat)
   const surfaceExcessF = {
+    'boil':            0,   // 212°F water cools surface on removal — no inward gradient
     'sous-vide':       3,   // Bath ≈ target, virtually no gradient
     'low-slow':       16,   // Long cook at 225–275°F → near-uniform profile
     'smoker':         18,   // Like low-slow with slight bark heat retention
@@ -138,6 +144,10 @@ export function estimateCarryover({
                            // When provided (≥2 values), runs a finite-difference simulation
                            // instead of the empirical formula — no calibration factors needed.
 }) {
+  // Category-specific thermal diffusivity
+  // Potato has a slightly higher diffusivity than muscle tissue due to its starch-water matrix.
+  const alpha = categoryId === 'potato' ? ALPHA_POTATO : ALPHA;
+
   // Sous vide: bath temp = target — virtually no internal gradient at pull.
   // The sear after the bath adds ~1–2°F which we represent as deltaF:1.
   if (methodId === 'sous-vide') {
@@ -152,7 +162,7 @@ export function estimateCarryover({
       penetrationFactor: 0,
       fractionReached: 0,
       halfThicknessM: (thicknessInches * 0.0254) / 2,
-      thermalDiffusivity: ALPHA,
+      thermalDiffusivity: alpha,
       surfaceDataSource: 'modeled',
     };
   }
@@ -185,9 +195,9 @@ export function estimateCarryover({
     // Compute the empirical fractionReached at the model's minutesToPeak
     // (same Fo formula as the empirical path below).
     const Lc = (thicknessInches * 0.0254) / 2;
-    const timeConstantSec     = (Lc * Lc) / ALPHA;
+    const timeConstantSec     = (Lc * Lc) / alpha;
     const minutesToPeakEmpir  = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
-    const Fo_empir            = (ALPHA * minutesToPeakEmpir * 60) / (Lc * Lc);
+    const Fo_empir            = (alpha * minutesToPeakEmpir * 60) / (Lc * Lc);
     const fractionReachedEmpir = 1 - Math.exp(-Math.PI * Math.PI * Fo_empir / 4);
 
     // Penetration factor (same as empirical path).
@@ -242,7 +252,7 @@ export function estimateCarryover({
 
   // Time to peak carryover (empirically ~35–50% of the "Fourier time constant")
   // Large cuts take longer to peak; thin cuts peak quickly
-  const timeConstantSec = (L * L) / ALPHA; // ~seconds for meaningful heat redistribution
+  const timeConstantSec = (L * L) / alpha; // ~seconds for meaningful heat redistribution
   // Cap raised to 120 min — large roasts (3"+) genuinely need 60-90 min to peak.
   // The old 30-min cap was accurate for steaks but wrong for briskets/prime ribs.
   const minutesToPeak = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
@@ -251,7 +261,7 @@ export function estimateCarryover({
   // arbitrary end of rest. Fo represents how far the heat front has penetrated
   // by the time the center temperature peaks — the physically meaningful instant.
   const tPeakSec = minutesToPeak * 60;
-  const Fo = (ALPHA * tPeakSec) / (L * L);
+  const Fo = (alpha * tPeakSec) / (L * L);
 
   // Surface-to-center gradient at pull.
   // If a real probe reading is available, use it directly — this makes the prediction
@@ -297,6 +307,11 @@ export function estimateCarryover({
   let penetrationFactor;
   if (categoryId === 'seafood') {
     penetrationFactor = isWrapped ? 0.85 : 0.80;
+  } else if (categoryId === 'potato') {
+    // Dense starchy sphere: moderate water content but thick skin and low surface gradient
+    // during oven rest means less inward conduction than fish, slightly below mammalian meat.
+    // Calibrated to ~3–5°F carryover for a 1" radius (2" diameter) potato at oven-moderate.
+    penetrationFactor = isWrapped ? 0.30 : 0.22;
   } else {
     penetrationFactor = isWrapped ? 0.50 : 0.28;
   }
@@ -328,7 +343,7 @@ export function estimateCarryover({
     penetrationFactor,
     fractionReached: Math.round(fractionReached * 1000) / 1000,
     halfThicknessM: Math.round(L * 10000) / 10000,
-    thermalDiffusivity: ALPHA,
+    thermalDiffusivity: alpha,
     surfaceDataSource,
   };
 }
