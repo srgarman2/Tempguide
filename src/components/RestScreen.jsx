@@ -387,8 +387,20 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
 
         <div className="physics-grid">
           <PhysicsParam
+            label="Biot Number"
+            symbol="Bi = h·Lc / k"
+            value={carryover.biot != null ? carryover.biot : 'N/A'}
+            detail={carryover.biot == null
+              ? 'Not used in finite-difference mode'
+              : carryover.biot < 0.1
+                ? 'Bi < 0.1 — near-lumped system (uniform temp)'
+                : carryover.biot > 10
+                  ? 'Bi > 10 — strong internal gradient'
+                  : 'Moderate: comparable surface and internal resistance'}
+          />
+          <PhysicsParam
             label="Fourier Number"
-            symbol="Fo = α·t / L²"
+            symbol="Fo = α·t / Lc²"
             value={carryover.fourier ?? 'N/A'}
             detail={carryover.fourier == null
               ? 'Not used in finite-difference mode'
@@ -406,11 +418,13 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           />
           <PhysicsParam
             label="Fraction Reached"
-            symbol="1 − e^(−π²Fo/4)"
+            symbol={carryover.lambda1 != null
+              ? `θ* = A₁·e^(−λ₁²·Fo) — λ₁=${carryover.lambda1}`
+              : '1 − θ*'}
             value={carryover.fractionReached ?? 'N/A'}
             detail={carryover.fractionReached == null
               ? 'Not used in finite-difference mode'
-              : 'How much of the gradient conducts inward'}
+              : 'One-term approximation: heat fraction reaching center'}
           />
           <PhysicsParam
             label="Penetration Factor"
@@ -423,15 +437,28 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
                 : 'Standard: accounts for 3D geometry, surface cooling'}
           />
           <PhysicsParam
-            label="Half-Thickness"
-            symbol="L = thickness / 2"
+            label="Characteristic Length"
+            symbol={`Lc (${selection.geometry ?? 'slab'})`}
             value={`${(carryover.halfThicknessM * 1000).toFixed(1)} mm`}
-            detail="Heat conduction path length"
+            detail={selection.geometry === 'cylinder' ? 'Lc = radius (cylindrical eigenvalues)'
+              : selection.geometry === 'sphere' ? 'Lc = radius (spherical eigenvalues)'
+              : 'Lc = half-thickness (plane wall)'}
+          />
+          <PhysicsParam
+            label="Convective h"
+            symbol={selection.isWrapped ? 'Wrapped (foil/tent)' : 'Unwrapped (still air)'}
+            value={carryover.convectiveH != null ? `${carryover.convectiveH} W/(m²·K)` : 'N/A'}
+            detail=""
           />
           <PhysicsParam
             label="Thermal Diffusivity"
             symbol="α (muscle tissue)"
-            value={`${(carryover.thermalDiffusivity * 1e7).toFixed(2)} × 10⁻⁷ m²/s`}
+            value={(() => {
+              const a = carryover.thermalDiffusivity;
+              const exp = Math.floor(Math.log10(Math.abs(a)));
+              const coeff = a / Math.pow(10, exp);
+              return `${coeff.toFixed(2)} × 10${exp < 0 ? '⁻' : ''}${String(Math.abs(exp)).split('').map(d => '⁰¹²³⁴⁵⁶⁷⁸⁹'[d]).join('')} m²/s`;
+            })()}
             detail=""
           />
         </div>
@@ -448,12 +475,15 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
             </>
           ) : (
             <>
-              <div className="physics-formula-label">Carryover Model</div>
+              <div className="physics-formula-label">One-Term Approximation (Heisler)</div>
               <div className="physics-formula-eq">
-                ΔT = gradient × fraction × penetration
+                θ* = A₁·exp(−λ₁²·Fo) — Bi = {carryover.biot}
+              </div>
+              <div className="physics-formula-eq">
+                ΔT = gradient × (1 − θ*) × penetration
               </div>
               <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                {carryover.surfaceGradientF}°F × {carryover.fractionReached} × {carryover.penetrationFactor} = <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
+                {carryover.surfaceGradientF}°F × {carryover.fractionReached} × {carryover.penetrationFactor?.toFixed(3)} = <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
               </div>
             </>
           )}

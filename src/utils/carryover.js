@@ -8,38 +8,261 @@
  * Physics basis:
  *  - Heat equation: ∂T/∂t = α·∇²T
  *  - α (thermal diffusivity of meat) ≈ 1.36×10⁻⁷ m²/s
- *  - Fourier number: Fo = α·t / L²  (dimensionless time)
- *  - Center temperature rise ≈ ΔT_surface · f(Fo)
+ *  - Fourier number: Fo = α·t / Lc²  (dimensionless time)
+ *  - Biot number: Bi = h·Lc / k  (surface resistance vs internal conduction)
+ *  - One-term approximation: θ* = A₁·exp(−λ₁²·Fo)
+ *    where λ₁ and A₁ are geometry-dependent functions of Bi
  *
- * The model is calibrated against empirical references:
+ * The model uses the Heisler one-term approximation (valid for Fo > 0.2)
+ * with geometry-specific characteristic lengths:
+ *   Slab:     Lc = half-thickness
+ *   Cylinder: Lc = radius
+ *   Sphere:   Lc = radius
+ *
+ * The Biot number is computed from dynamic convective heat transfer
+ * coefficients (h) that vary with the rest condition (wrapped vs unwrapped).
+ *
+ * Wet-bulb temperature depression is modeled to account for evaporative
+ * cooling at the meat surface during unwrapped rest, preventing systematic
+ * over-prediction of carryover.
+ *
+ * Calibrated against empirical references:
  *  - Thermoworks: pull 5–7°F before target for steaks (1")
  *  - Chris Young / ChefSteps research on beef and poultry
  *  - USDA Appendix A time-temperature pasteurization tables
  *  - Empirical data: seafood pan-sear can spike 15–19°F due to thin profile
  *    and high water content (~75%) increasing effective heat transfer
  *
- * Key protein-category differences:
- *  - Mammalian muscle (beef, pork): penetration factor 0.28
- *    Calibrated to ~7–9°F carryover for 1" steak at pan-sear
- *  - Avian muscle (poultry): similar to mammalian, same penetration factor
- *    Safety achieved by time-temperature pasteurization, not just final temp
- *  - Seafood: penetration factor 0.80
- *    Thin fillets + high water content → rapid heat equalization
- *    Pan-sear carryover: 15–19°F for 0.75" fillet (pull aggressively early)
- *
- * Limitations: assumes uniform slab geometry, homogeneous conductivity,
- * still air during rest (not wrapped).
+ * Limitations: assumes homogeneous conductivity.
  */
 
 import { simulateCarryover } from './heatSim';
 
-// Thermal diffusivity of beef/pork/poultry ≈ 1.36e-7 m²/s
+// ── Thermal properties ────────────────────────────────────────────────────────
+
+/** Thermal diffusivity of beef/pork/poultry muscle ≈ 1.36×10⁻⁷ m²/s */
 const ALPHA = 1.36e-7;
 
-// Thermal diffusivity of raw potato flesh ≈ 1.40e-7 m²/s
-// Slightly higher than muscle due to the starch-water matrix.
-// Source: food science literature; Califano & Calvelo (1991), Rahman (2009)
+/** Thermal diffusivity of raw potato flesh ≈ 1.40×10⁻⁷ m²/s
+ *  Slightly higher than muscle due to the starch-water matrix.
+ *  Source: Califano & Calvelo (1991), Rahman (2009) */
 const ALPHA_POTATO = 1.4e-7;
+
+/** Thermal conductivity of meat — W/(m·K). Used for Biot number calculation. */
+const K_MEAT = 0.49;
+
+/** Convective heat transfer coefficient — open air natural convection, W/(m²·K).
+ *  Typical for still air over a warm horizontal surface (Incropera & DeWitt). */
+const H_OPEN = 10;
+
+/** Convective h for foil-tented rest — steam trap reduces convection, W/(m²·K).
+ *  Foil tent creates a stagnant, saturated microclimate. */
+const H_FOIL = 3;
+
+// ── Wet-bulb temperature depression ───────────────────────────────────────────
+
+/**
+ * Estimate the effective ambient temperature at the meat surface during rest.
+ *
+ * During unwrapped rest, evaporative cooling (latent heat of vaporization of water,
+ * ~2.26 MJ/kg) depresses the effective boundary condition below dry-bulb ambient.
+ * The surface acts as a wet-bulb thermometer: moisture evaporating from the crust
+ * absorbs energy that would otherwise conduct inward.
+ *
+ * Model: T_effective = T_ambient − wetBulbDepression
+ *
+ * The depression depends on:
+ *   - Relative humidity (kitchen ~40–60% typical)
+ *   - Surface moisture availability (high right after pull, decreasing as crust dries)
+ *   - Air velocity (still air → lower evaporation rate)
+ *
+ * Default depression of 8°F corresponds to ~50% RH at 72°F dry-bulb.
+ * Wrapped rest: depression ≈ 0 (trapped steam saturates the air, RH → 100%).
+ *
+ * When live probe data shows the outer sensor cooling faster than conduction alone
+ * predicts, we can infer higher evaporative loss and increase the depression.
+ *
+ * @param {number} ambientTempF  - Dry-bulb ambient temperature (°F)
+ * @param {boolean} isWrapped    - Whether the meat is wrapped/tented
+ * @param {number} [surfaceTempF] - Current surface temp (°F), used for enhanced model
+ * @returns {number} Effective ambient temperature at the surface boundary (°F)
+ */
+function effectiveAmbientF(ambientTempF, isWrapped, surfaceTempF = null) {
+  if (isWrapped) return ambientTempF; // Saturated microclimate, no evaporative cooling
+
+  // Base wet-bulb depression at ~50% RH, scaled by surface-to-ambient ΔT.
+  // Hotter surface = more vigorous evaporation = deeper depression.
+  const baseDepression = 8; // °F at 50% RH, 72°F ambient
+  if (surfaceTempF != null && surfaceTempF > ambientTempF) {
+    // Scale depression: stronger when surface is much hotter (more moisture driven off)
+    const drivingDelta = surfaceTempF - ambientTempF;
+    const scale = Math.min(1.5, Math.max(0.5, drivingDelta / 80)); // normalized to ~80°F typical gradient
+    return ambientTempF - baseDepression * scale;
+  }
+  return ambientTempF - baseDepression;
+}
+
+// ── Biot Number Lookup Tables ─────────────────────────────────────────────────
+//
+// Standard thermodynamic tables for the one-term approximation of transient
+// heat conduction in three canonical geometries. Source: Incropera & DeWitt,
+// "Fundamentals of Heat and Mass Transfer", Table 5.1.
+//
+// For each geometry, given Biot number Bi, we look up:
+//   λ₁ — the first root of the characteristic equation
+//   A₁ — the amplitude coefficient
+//
+// The dimensionless center temperature is then:
+//   θ* = A₁ · exp(−λ₁² · Fo)
+//
+// where θ* = (T_center − T_∞) / (T_initial − T_∞)
+// and Fo = α·t / Lc² is the Fourier number.
+
+/**
+ * Biot lookup table entries: [Bi, λ₁, A₁]
+ * Covers Bi from 0.01 to 100 (lumped system to semi-infinite solid).
+ */
+const BIOT_TABLE_SLAB = [
+  // Bi,     λ₁,       A₁
+  [0.01,   0.0998,   1.0017],
+  [0.02,   0.1410,   1.0033],
+  [0.04,   0.1987,   1.0066],
+  [0.06,   0.2425,   1.0098],
+  [0.08,   0.2791,   1.0130],
+  [0.10,   0.3111,   1.0161],
+  [0.20,   0.4328,   1.0311],
+  [0.30,   0.5218,   1.0450],
+  [0.40,   0.5932,   1.0580],
+  [0.50,   0.6533,   1.0701],
+  [0.60,   0.7051,   1.0814],
+  [0.70,   0.7506,   1.0919],
+  [0.80,   0.7910,   1.1016],
+  [0.90,   0.8274,   1.1107],
+  [1.00,   0.8603,   1.1191],
+  [2.00,   1.0769,   1.1785],
+  [3.00,   1.1925,   1.2102],
+  [4.00,   1.2646,   1.2287],
+  [5.00,   1.3138,   1.2403],
+  [6.00,   1.3496,   1.2479],
+  [7.00,   1.3766,   1.2532],
+  [8.00,   1.3978,   1.2570],
+  [9.00,   1.4149,   1.2598],
+  [10.0,   1.4289,   1.2620],
+  [20.0,   1.4961,   1.2699],
+  [30.0,   1.5202,   1.2717],
+  [40.0,   1.5325,   1.2723],
+  [50.0,   1.5400,   1.2727],
+  [100.0,  1.5552,   1.2731],
+];
+
+const BIOT_TABLE_CYLINDER = [
+  [0.01,   0.1412,   1.0025],
+  [0.02,   0.1995,   1.0050],
+  [0.04,   0.2814,   1.0099],
+  [0.06,   0.3438,   1.0148],
+  [0.08,   0.3960,   1.0197],
+  [0.10,   0.4417,   1.0246],
+  [0.20,   0.6170,   1.0483],
+  [0.30,   0.7465,   1.0712],
+  [0.40,   0.8516,   1.0932],
+  [0.50,   0.9408,   1.1143],
+  [0.60,   1.0184,   1.1346],
+  [0.70,   1.0873,   1.1539],
+  [0.80,   1.1490,   1.1725],
+  [0.90,   1.2048,   1.1902],
+  [1.00,   1.2558,   1.2071],
+  [2.00,   1.5995,   1.3384],
+  [3.00,   1.7887,   1.4191],
+  [4.00,   1.9081,   1.4698],
+  [5.00,   1.9898,   1.5029],
+  [6.00,   2.0490,   1.5253],
+  [7.00,   2.0937,   1.5411],
+  [8.00,   2.1286,   1.5526],
+  [9.00,   2.1566,   1.5611],
+  [10.0,   2.1795,   1.5677],
+  [20.0,   2.2880,   1.5919],
+  [30.0,   2.3261,   1.5973],
+  [40.0,   2.3455,   1.5993],
+  [50.0,   2.3572,   1.6002],
+  [100.0,  2.3809,   1.6015],
+];
+
+const BIOT_TABLE_SPHERE = [
+  [0.01,   0.1730,   1.0030],
+  [0.02,   0.2445,   1.0060],
+  [0.04,   0.3450,   1.0120],
+  [0.06,   0.4217,   1.0179],
+  [0.08,   0.4860,   1.0239],
+  [0.10,   0.5423,   1.0298],
+  [0.20,   0.7593,   1.0592],
+  [0.30,   0.9208,   1.0880],
+  [0.40,   1.0528,   1.1164],
+  [0.50,   1.1656,   1.1441],
+  [0.60,   1.2644,   1.1713],
+  [0.70,   1.3525,   1.1978],
+  [0.80,   1.4320,   1.2236],
+  [0.90,   1.5044,   1.2488],
+  [1.00,   1.5708,   1.2732],
+  [2.00,   2.0288,   1.4793],
+  [3.00,   2.2889,   1.6227],
+  [4.00,   2.4556,   1.7202],
+  [5.00,   2.5704,   1.7870],
+  [6.00,   2.6537,   1.8338],
+  [7.00,   2.7165,   1.8674],
+  [8.00,   2.7654,   1.8921],
+  [9.00,   2.8044,   1.9106],
+  [10.0,   2.8363,   1.9249],
+  [20.0,   2.9857,   1.9781],
+  [30.0,   3.0372,   1.9898],
+  [40.0,   3.0632,   1.9942],
+  [50.0,   3.0788,   1.9962],
+  [100.0,  3.1102,   1.9990],
+];
+
+/**
+ * Select the Biot lookup table for a given geometry.
+ * 'tapered' uses slab table (closest approximation for irregular geometry).
+ */
+function getBiotTable(geometry) {
+  if (geometry === 'cylinder') return BIOT_TABLE_CYLINDER;
+  if (geometry === 'sphere')   return BIOT_TABLE_SPHERE;
+  return BIOT_TABLE_SLAB; // slab, tapered, or fallback
+}
+
+/**
+ * Linear interpolation in the Biot lookup table.
+ *
+ * Given a Biot number, returns the interpolated { lambda1, A1 } for the
+ * appropriate geometry. Clamps to table bounds at extremes.
+ *
+ * @param {number} Bi        - Biot number
+ * @param {string} geometry  - 'slab' | 'cylinder' | 'sphere' | 'tapered'
+ * @returns {{ lambda1: number, A1: number }}
+ */
+function biotLookup(Bi, geometry) {
+  const table = getBiotTable(geometry);
+
+  // Clamp to table range
+  if (Bi <= table[0][0]) return { lambda1: table[0][1], A1: table[0][2] };
+  if (Bi >= table[table.length - 1][0]) {
+    const last = table[table.length - 1];
+    return { lambda1: last[1], A1: last[2] };
+  }
+
+  // Find bracketing entries and interpolate
+  for (let i = 0; i < table.length - 1; i++) {
+    if (Bi >= table[i][0] && Bi <= table[i + 1][0]) {
+      const frac = (Bi - table[i][0]) / (table[i + 1][0] - table[i][0]);
+      return {
+        lambda1: table[i][1] + frac * (table[i + 1][1] - table[i][1]),
+        A1:      table[i][2] + frac * (table[i + 1][2] - table[i][2]),
+      };
+    }
+  }
+  // Fallback (should not reach here)
+  const last = table[table.length - 1];
+  return { lambda1: last[1], A1: last[2] };
+}
 
 /**
  * Method-specific penetration factor overrides.
@@ -77,20 +300,49 @@ const METHOD_PF_OVERRIDE = {
 const SUPPRESS_THICKNESS_SCALE = new Set(['basting-flip', 'boil', 'sous-vide', 'jeff-special']);
 
 /**
- * Geometry correction factors for the penetration factor.
+ * Geometry definitions with strict characteristic lengths.
  *
- * The base model assumes infinite slab geometry (L = half-thickness).
- * Real cuts have different surface-area-to-volume ratios that affect
- * how much of the surface gradient conducts inward vs. escapes to air.
+ * The characteristic length Lc is the shortest conduction path from the
+ * surface boundary condition to the geometric center — the physically
+ * meaningful length scale for the Fourier and Biot numbers.
  *
- *   slab (default): 1.00 — flat steaks, chops, fillets
- *   tapered: 0.80 — tri-tip, flank with variable thickness.
- *     Higher S/V at the thin end → more heat escapes. The thick-end
- *     carryover is less than a uniform slab at the same max thickness.
- *   cylinder: 1.10 — tenderloin, sausage, rolled roasts.
- *     Radial conduction from all sides (not just top/bottom) delivers
- *     more heat to center. Effective Fo is higher for same L.
+ *   Slab (infinite plane wall): Lc = half-thickness
+ *     Heat flows from two parallel faces toward the center plane.
+ *
+ *   Cylinder (infinite): Lc = radius
+ *     Heat flows radially inward from the cylindrical surface.
+ *     (Not radius/2 — the full radius is the correct Lc for Fo and Bi
+ *     in the one-term approximation with the cylindrical eigenvalues.)
+ *
+ *   Sphere: Lc = radius
+ *     Heat flows radially from all directions toward center.
+ *     (Again, full radius with spherical eigenvalues.)
+ *
+ *   Tapered: uses slab Lc (best approximation for irregular geometry)
+ *     with a reduced penetration factor to account for edge losses.
+ *
+ * @param {string} geometry        - 'slab' | 'tapered' | 'cylinder' | 'sphere'
+ * @param {number} thicknessInches - User-entered thickness or diameter
+ * @returns {number} Characteristic length Lc in meters
  */
+function characteristicLength(geometry, thicknessInches) {
+  const thicknessM = thicknessInches * 0.0254;
+  switch (geometry) {
+    case 'cylinder':
+      // User enters diameter for cylindrical cuts (e.g. prime rib "eye diameter").
+      // Lc = radius = diameter / 2.
+      return thicknessM / 2;
+    case 'sphere':
+      // User enters diameter. Lc = radius = diameter / 2.
+      return thicknessM / 2;
+    case 'tapered':
+    case 'slab':
+    default:
+      // User enters total thickness. Lc = half-thickness.
+      return thicknessM / 2;
+  }
+}
+
 export const GEOMETRY_TYPES = {
   slab:     { label: 'Flat',     factor: 1.00 },
   tapered:  { label: 'Tapered',  factor: 0.80 },
@@ -247,21 +499,29 @@ export function estimateCarryover({
   // Result: same peak magnitude as empirical model (calibrated), but better timing
   // and a more physically realistic rise/fall curve driven by the actual gradient.
   if (sensorGradientF != null && sensorGradientF.length >= 2) {
+    // ── Wet-bulb corrected ambient for FD boundary condition ──────────────
+    const fdSurfaceTemp = sensorGradientF[sensorGradientF.length - 1];
+    const fdEffectiveAmbient = effectiveAmbientF(ambientTempF, isWrapped, fdSurfaceTemp);
+
     const fdRaw = simulateCarryover({
       sensorTempsF:   sensorGradientF,
       thicknessInches,
-      ambientTempF,
+      ambientTempF:   fdEffectiveAmbient,
       isWrapped,
       simMinutes:     Math.max(restMinutes + 30, 45),
+      geometry,
     });
 
-    // Compute the empirical fractionReached at the model's minutesToPeak
-    // (same Fo formula as the empirical path below).
-    const Lc = (thicknessInches * 0.0254) / 2;
+    // Compute one-term approximation fractionReached at the model's minutesToPeak
+    const Lc = characteristicLength(geometry, thicknessInches);
+    const h_fd = isWrapped ? H_FOIL : H_OPEN;
+    const Bi_fd = (h_fd * Lc) / K_MEAT;
+    const { lambda1: lam1_fd, A1: A1_fd } = biotLookup(Bi_fd, geometry);
     const timeConstantSec     = (Lc * Lc) / alpha;
     const minutesToPeakEmpir  = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
     const Fo_empir            = (alpha * minutesToPeakEmpir * 60) / (Lc * Lc);
-    const fractionReachedEmpir = 1 - Math.exp(-Math.PI * Math.PI * Fo_empir / 4);
+    const thetaStar_fd        = A1_fd * Math.exp(-lam1_fd * lam1_fd * Fo_empir);
+    const fractionReachedEmpir = Math.max(0, Math.min(1, 1 - thetaStar_fd));
 
     // Penetration factor (same cascade as empirical path: method → category → default).
     let pf;
@@ -316,102 +576,95 @@ export function estimateCarryover({
       peakTempF:        Math.round(calibPeak * 10) / 10,
       minutesToPeak:    calibMinutesToPeak,
       deltaF:           Math.round(calibDeltaF * 10) / 10,
-      penetrationFactor: Math.round(correction * 1000) / 1000,  // correction shown as pf
+      penetrationFactor: Math.round(correction * 1000) / 1000,
       fractionReached:   Math.round(fractionReachedEmpir * 1000) / 1000,
       fourier:           Math.round(Fo_empir * 100) / 100,
+      biot:              Math.round(Bi_fd * 1000) / 1000,
+      lambda1:           Math.round(lam1_fd * 10000) / 10000,
+      A1:                Math.round(A1_fd * 10000) / 10000,
+      effectiveAmbientF: Math.round(fdEffectiveAmbient * 10) / 10,
+      convectiveH:       h_fd,
     };
   }
 
-  // Half-thickness in meters
-  const L = (thicknessInches * 0.0254) / 2;
+  // ── Geometry-specific characteristic length ──────────────────────────────
+  const Lc = characteristicLength(geometry, thicknessInches);
 
-  // Time to peak carryover (empirically ~35–50% of the "Fourier time constant")
-  // Large cuts take longer to peak; thin cuts peak quickly
-  const timeConstantSec = (L * L) / alpha; // ~seconds for meaningful heat redistribution
-  // Cap raised to 120 min — large roasts (3"+) genuinely need 60-90 min to peak.
-  // The old 30-min cap was accurate for steaks but wrong for briskets/prime ribs.
+  // ── Biot number ─────────────────────────────────────────────────────────
+  // Bi = h·Lc / k — ratio of surface convective resistance to internal conduction.
+  //   Bi < 0.1: lumped system (uniform temperature, no internal gradient)
+  //   Bi ~ 1:   comparable surface and internal resistance
+  //   Bi > 10:  surface approaches step change (prescribed temperature BC)
+  const h = isWrapped ? H_FOIL : H_OPEN;
+  const Bi = (h * Lc) / K_MEAT;
+
+  // ── One-term approximation coefficients ─────────────────────────────────
+  // Look up λ₁ and A₁ from the standard Heisler tables based on geometry and Bi.
+  const { lambda1, A1 } = biotLookup(Bi, geometry);
+
+  // ── Time to peak carryover ──────────────────────────────────────────────
+  // Empirically ~35–50% of the "Fourier time constant" (Lc²/α).
+  // Large cuts take longer to peak; thin cuts peak quickly.
+  const timeConstantSec = (Lc * Lc) / alpha;
+  // Cap at 120 min — large roasts (3"+) genuinely need 60-90 min to peak.
   const minutesToPeak = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
 
-  // TWEAK 1: Evaluate Fourier number at the moment of peak carryover, not at the
-  // arbitrary end of rest. Fo represents how far the heat front has penetrated
-  // by the time the center temperature peaks — the physically meaningful instant.
+  // Evaluate Fourier number at the moment of peak carryover — the physically
+  // meaningful instant, not the arbitrary end of rest.
   const tPeakSec = minutesToPeak * 60;
-  const Fo = (alpha * tPeakSec) / (L * L);
+  const Fo = (alpha * tPeakSec) / (Lc * Lc);
 
-  // Surface-to-center gradient at pull.
-  // If a real probe reading is available, use it directly — this makes the prediction
-  // data-driven rather than model-driven. Otherwise fall back to the method model.
-  //
-  // Thickness scaling for the model path:
-  //   Cook time scales as L² — a thicker cut spends much longer at high heat before
-  //   the center reaches pull temp. The outer layers accumulate proportionally more
-  //   thermal energy. Empirically, gradient depth grows with sqrt(L), so we scale
-  //   the modeled surface excess by sqrt(thicknessInches) relative to the 1" baseline.
-  //
-  //   Effect (pan-sear, pf=0.28):
-  //     1.0" → ×1.00 → 7.5°F  (baseline, unchanged)
-  //     1.5" → ×1.22 → 9.2°F
-  //     2.0" → ×1.41 → 10.6°F
-  //     3.0" → ×1.73 → 13.0°F
-  //
-  //   Thin cuts (≤1") keep their existing behaviour (the minutesToPeak floor at 3 min
-  //   already pushes Fo above 0.45 and slightly raises their fractionReached).
+  // ── Surface-to-center gradient at pull ──────────────────────────────────
   const modelledSurfaceTemp  = estimateSurfaceTempAtPull(methodId, pullTempF);
   const thicknessScale       = SUPPRESS_THICKNESS_SCALE.has(methodId)
-    ? 1.0  // Surface heat source is thickness-independent (e.g. butter temp, water temp)
-    : Math.max(1.0, Math.sqrt(thicknessInches)); // ≥1" only
+    ? 1.0
+    : Math.max(1.0, Math.sqrt(thicknessInches));
   const scaledSurfaceTemp    = pullTempF + (modelledSurfaceTemp - pullTempF) * thicknessScale;
   const surfaceDataSource = overrideSurfaceTempF != null ? 'measured' : 'modeled';
   const surfaceTempAtPull = overrideSurfaceTempF ?? scaledSurfaceTemp;
   const surfaceGradient = surfaceTempAtPull - pullTempF;
 
-  // Fraction of gradient that reaches center (heat equation analytical solution for slab)
-  const fractionReached = 1 - Math.exp(-Math.PI * Math.PI * Fo / 4);
+  // ── Wet-bulb corrected ambient for boundary condition ───────────────────
+  const effectiveAmbient = effectiveAmbientF(ambientTempF, isWrapped, surfaceTempAtPull);
 
-  // Penetration factor — accounts for surface cooling, 3D geometry, evaporative losses.
+  // ── One-term approximation: dimensionless center temperature ────────────
+  // θ* = A₁ · exp(−λ₁² · Fo)
   //
-  // Unwrapped (default):
-  //   Seafood 0.80 — thin fillets + high water content transfer heat rapidly;
-  //     empirical: 0.75" fish at pan-sear spikes 15–19°F at center
-  //   Mammalian/avian 0.28 — calibrated to Thermoworks 7–9°F for 1" steak
+  // θ* represents (T_center − T_∞) / (T_initial − T_∞) at dimensionless time Fo.
+  // We use it as the fraction of the initial gradient that has NOT yet reached the center,
+  // so fractionReached = 1 − θ*.
   //
-  // isWrapped (foil/butcher paper rest):
-  //   Eliminates evaporative cooling and convective loss to ambient air.
-  //   Surface heat has nowhere to go but inward → factor nearly doubles.
-  //   Seafood 0.85 — minimal practical change (rarely wrapped)
-  //   Mammalian/avian 0.50 — reflects reduced surface loss during foil rest;
-  //     conservative: a cambro/cooler brisket rest can reach even higher.
-  // Penetration factor cascade: method override → category default.
-  // Method overrides capture unique surface boundary conditions (e.g. basting butter film).
+  // This replaces the old hardcoded formula: 1 − exp(−π²·Fo/4)
+  // The one-term approximation is more accurate because:
+  //   1. λ₁ and A₁ are geometry-specific (slab vs cylinder vs sphere)
+  //   2. They account for the actual Biot number (surface boundary condition)
+  //   3. The old formula implicitly assumed Bi → ∞ (prescribed surface temp)
+  const thetaStar = A1 * Math.exp(-lambda1 * lambda1 * Fo);
+  const fractionReached = Math.max(0, Math.min(1, 1 - thetaStar));
+
+  // ── Penetration factor ──────────────────────────────────────────────────
+  // Accounts for surface cooling, evaporative losses, and 3D effects not captured
+  // by the one-term approximation geometry model alone.
   let penetrationFactor;
   const methodOverride = METHOD_PF_OVERRIDE[methodId];
   if (methodOverride) {
     penetrationFactor = isWrapped ? methodOverride.wrapped : methodOverride.unwrapped;
-    // Thickness-dependent decay: the butter film cools in ~2–3 min regardless of meat
-    // thickness, so its effectiveness decays with distance from surface.
     if (methodOverride.decayPerInch) {
       penetrationFactor *= Math.exp(-methodOverride.decayPerInch * Math.max(0, thicknessInches - 0.5));
     }
   } else if (categoryId === 'seafood') {
     penetrationFactor = isWrapped ? 0.85 : 0.80;
   } else if (categoryId === 'potato') {
-    // Dense starchy sphere: moderate water content but thick skin and low surface gradient
-    // during oven rest means less inward conduction than fish, slightly below mammalian meat.
-    // Calibrated to ~3–5°F carryover for a 1" radius (2" diameter) potato at oven-moderate.
     penetrationFactor = isWrapped ? 0.30 : 0.22;
   } else {
     penetrationFactor = isWrapped ? 0.50 : 0.28;
   }
 
-  // Apply geometry correction — tapered cuts (tri-tip) lose more heat from edges,
-  // cylindrical cuts (tenderloin) gain from radial conduction.
+  // Apply geometry correction (tapered cuts lose more heat from edges)
   const geoFactor = GEOMETRY_TYPES[geometry]?.factor ?? 1.0;
   penetrationFactor *= geoFactor;
 
-  // Bone-in correction: bone has thermal conductivity ~0.5 W/(m·K) vs muscle ~0.5 W/(m·K)
-  // at low temp, but cortical bone is ~0.3 W/(m·K) — effectively insulating one face of the
-  // roast. For a cylindrical rib roast, the bone side (~30% of circumference) conducts ~40%
-  // less heat inward → net reduction of ~12–15% in effective penetration.
+  // Bone-in correction: bone insulates one face → ~15% less effective penetration
   if (boneIn) {
     penetrationFactor *= 0.85;
   }
@@ -428,7 +681,7 @@ export function estimateCarryover({
     peakTempF,
     minutesToPeak,
     restMinutes,
-    ambientTempF,
+    ambientTempF: effectiveAmbient,
     thicknessInches,
   });
 
@@ -438,15 +691,20 @@ export function estimateCarryover({
     minutesToPeak: Math.round(minutesToPeak),
     restProfile,
     fourier: Math.round(Fo * 100) / 100,
+    biot: Math.round(Bi * 1000) / 1000,
+    lambda1: Math.round(lambda1 * 10000) / 10000,
+    A1: Math.round(A1 * 10000) / 10000,
     surfaceTempAtPull: Math.round(surfaceTempAtPull),
     surfaceGradientF: Math.round(surfaceGradient * 10) / 10,
     penetrationFactor,
     fractionReached: Math.round(fractionReached * 1000) / 1000,
-    halfThicknessM: Math.round(L * 10000) / 10000,
+    halfThicknessM: Math.round(Lc * 10000) / 10000,
     thermalDiffusivity: alpha,
     surfaceDataSource,
     geometry,
     geometryFactor: geoFactor,
+    effectiveAmbientF: Math.round(effectiveAmbient * 10) / 10,
+    convectiveH: h,
   };
 }
 

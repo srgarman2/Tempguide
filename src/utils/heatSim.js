@@ -92,14 +92,18 @@ function interpolateToNodes(sensorTempsF, nNodes) {
  *   sensorTempsF[0] = core (T_virtualCore), sensorTempsF[last] = surface (T_virtualSurface).
  *   Must have at least 2 values.
  * @param {number}  params.thicknessInches
- *   Total thickness of the meat (simulation uses half-thickness as L).
+ *   Total thickness of the meat (or diameter for cylindrical/spherical geometry).
  * @param {number}  [params.ambientTempF=72]
- *   Kitchen/ambient temperature (°F). Used for convective BC at surface.
+ *   Effective ambient temperature (°F). Caller should apply wet-bulb depression
+ *   before passing this value. Used for convective BC at surface.
  * @param {boolean} [params.isWrapped=false]
  *   True if meat is foil-tented or tightly wrapped during rest.
  *   Reduces h from H_OPEN to H_FOIL — steam traps surface heat → more inward conduction.
  * @param {number}  [params.simMinutes=60]
  *   How many minutes to simulate. Should be restMinutes + 30 to capture full peak + cooling.
+ * @param {string}  [params.geometry='slab']
+ *   Geometry type: 'slab' | 'cylinder' | 'sphere' | 'tapered'.
+ *   Determines the characteristic length Lc used for the spatial grid.
  *
  * @returns {{
  *   restProfile:        Array<{minute: number, tempF: number}>,
@@ -123,14 +127,17 @@ export function simulateCarryover({
   ambientTempF   = 72,
   isWrapped      = false,
   simMinutes     = 60,
+  geometry       = 'slab',
 }) {
   if (!sensorTempsF || sensorTempsF.length < 2) {
     throw new Error('[heatSim] sensorTempsF must have at least 2 readings');
   }
 
-  // ── Geometry ──────────────────────────────────────────────────────────────
-  const L  = (thicknessInches * 0.0254) / 2;   // half-thickness in meters
-  const dx = L / N_NODES;                        // node spacing in meters
+  // ── Geometry-specific characteristic length ───────────────────────────────
+  // Slab/Tapered: Lc = half-thickness.  Cylinder/Sphere: Lc = radius = diameter/2.
+  const thicknessM = thicknessInches * 0.0254;
+  const L  = thicknessM / 2; // For all geometries, user enters total thickness/diameter
+  const dx = L / N_NODES;
 
   // ── Boundary condition ────────────────────────────────────────────────────
   const h = isWrapped ? H_FOIL : H_OPEN;
