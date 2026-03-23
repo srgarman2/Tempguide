@@ -284,14 +284,18 @@ function biotLookup(Bi, geometry) {
  *     persists AFTER the steak is pulled. Unlike pan-sear where the surface cools
  *     to air immediately, basting keeps the surface hot → more heat conducts inward.
  *
- *     decayPerInch: the butter film cools in ~2–3 minutes regardless of meat thickness.
- *     For thin cuts that's enough time for heat to fully penetrate; for thick cuts it's
- *     not. The pf decays exponentially from the baseline starting at 0.5":
- *       pf_effective = pf × exp(-decay × max(0, thicknessInches - 0.5))
- *     Calibrated: 0.5" → ~19°F, 1.0" → ~13°F, 1.5" → ~11°F, 2.0" → ~8°F
+ *     The butter film's thermal mass is meaningful for steaks up to ~1": the film
+ *     stays hot long enough for heat to reach the center. Beyond 1" the reservoir
+ *     cools before the interior equilibrates, so we decay exponentially:
+ *       pf_effective = pf × exp(-decay × max(0, thicknessInches - decayOrigin))
+ *
+ *     Calibrated against Chris Young / ChefSteps empirical data:
+ *       0.5” → ~25°F (clamped), 0.75” → ~20°F, 1.0” → ~20°F,
+ *       1.5” → ~16°F, 2.0” → ~13°F, 3.0” → ~8°F
+ *     Chris Young reports "around 20°F" carryover for typical basted steaks.
  */
 const METHOD_PF_OVERRIDE = {
-  'basting-flip': { unwrapped: 0.38, wrapped: 0.55, decayPerInch: 0.45 },
+  'basting-flip': { unwrapped: 0.53, wrapped: 0.70, decayPerInch: 0.45, decayOrigin: 1.0 },
   'jeff-special': { unwrapped: 0.50, wrapped: 0.50 },
 };
 
@@ -424,10 +428,10 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
     'pan-sear':       40,   // Hot pan: effective sub-surface gradient ~40°F above center
     'jeff-special':   15,   // Volumetric heating + trapped steam caps the surface gradient
     'basting-flip':   65,   // Continuous hot-butter basting (~320–350°F) persists AFTER pull;
-                            // residual surface heat drives 15–20°F rise in thin cuts.
-                            // Chris Young empirical: "up to 20°F" for small/thin steaks.
-                            // pf override (0.38) + no thickness scaling → monotonic decrease:
-                            // 0.5" → ~19°F, 1.0" → ~16.5°F, 1.5" → ~10°F, 2.0" → ~7°F.
+                            // residual surface heat drives 15–20°F rise in typical steaks.
+                            // Chris Young empirical: "around 20°F" for basted steaks.
+                            // pf override (0.53) + no thickness scaling + decay from 1.0":
+                            // 0.5" → ~25°F, 0.75" → ~20°F, 1.0" → ~20°F, 2.0" → ~13°F.
     'air-fryer':      25,   // High-convection, similar to oven-moderate
   };
   const excess = surfaceExcessF[methodId] ?? 45;
@@ -571,7 +575,8 @@ export function estimateCarryover({
     if (fdMethodOverride) {
       pf = isWrapped ? fdMethodOverride.wrapped : fdMethodOverride.unwrapped;
       if (fdMethodOverride.decayPerInch) {
-        pf *= Math.exp(-fdMethodOverride.decayPerInch * Math.max(0, thicknessInches - 0.5));
+        const origin = fdMethodOverride.decayOrigin ?? 0.5;
+        pf *= Math.exp(-fdMethodOverride.decayPerInch * Math.max(0, thicknessInches - origin));
       }
     } else if (categoryId === 'seafood') {
       pf = isWrapped ? 0.85 : 0.80;
@@ -699,7 +704,8 @@ export function estimateCarryover({
   if (methodOverride) {
     penetrationFactor = isWrapped ? methodOverride.wrapped : methodOverride.unwrapped;
     if (methodOverride.decayPerInch) {
-      penetrationFactor *= Math.exp(-methodOverride.decayPerInch * Math.max(0, thicknessInches - 0.5));
+      const origin = methodOverride.decayOrigin ?? 0.5;
+      penetrationFactor *= Math.exp(-methodOverride.decayPerInch * Math.max(0, thicknessInches - origin));
     }
   } else if (categoryId === 'seafood') {
     penetrationFactor = isWrapped ? 0.85 : 0.80;
