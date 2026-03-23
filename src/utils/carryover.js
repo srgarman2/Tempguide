@@ -360,6 +360,36 @@ export const GEOMETRY_TYPES = {
 };
 
 /**
+ * Geometry-specific eigenvalues at Bi → ∞ for the carryover fraction.
+ *
+ * Carryover is driven by INTERNAL redistribution of the non-uniform
+ * temperature profile deposited during cooking. The rate of this
+ * redistribution is governed by the geometry's natural conduction modes
+ * (eigenvalues of the Laplacian on the domain), which are independent
+ * of the surface convective boundary condition (Biot number).
+ *
+ * The Biot number controls how fast the SURFACE cools toward ambient,
+ * but the initial carryover heat is already deposited inside the meat —
+ * internal thermal diffusion drives it to the center regardless of
+ * what happens at the boundary.
+ *
+ * Using Biot-dependent eigenvalues (λ₁ ≈ 0.5 at typical Bi ≈ 0.3)
+ * would produce fractionReached values ~10× too small for the calibrated
+ * penetration factors, yielding <1°F carryover for everything.
+ *
+ * The Bi → ∞ eigenvalues ARE still geometry-aware:
+ *   Slab:     λ₁ = π/2,    A₁ = 4/π     (planar heat flow)
+ *   Cylinder: λ₁ = j₀,₁,   A₁ = 1.602   (radial convergence → faster)
+ *   Sphere:   λ₁ = π,      A₁ = 2.0     (full 3D convergence → fastest)
+ */
+const CARRYOVER_EIGENVALUES = {
+  slab:     { lambda1: Math.PI / 2, A1: 4 / Math.PI },   // 1.5708, 1.2732
+  cylinder: { lambda1: 2.4048,      A1: 1.6020 },        // first zero of J₀
+  sphere:   { lambda1: Math.PI,     A1: 2.0 },           // π, 2
+  tapered:  { lambda1: Math.PI / 2, A1: 4 / Math.PI },   // same as slab
+};
+
+/**
  * Estimated surface temperature at moment of removal from heat source.
  * This drives the inward heat flux during rest.
  * Values are calibrated empirically.
@@ -511,7 +541,7 @@ export function estimateCarryover({
   if (sensorGradientF != null && sensorGradientF.length >= 2) {
     // ── Wet-bulb corrected ambient for FD boundary condition ──────────────
     const fdSurfaceTemp = sensorGradientF[sensorGradientF.length - 1];
-    const fdEffectiveAmbient = effectiveAmbientF(ambientTempF, isWrapped, fdSurfaceTemp);
+    const fdEffectiveAmbient = effectiveAmbientF(ambientTempF, isWrapped);
 
     const fdRaw = simulateCarryover({
       sensorTempsF:   sensorGradientF,
@@ -522,7 +552,8 @@ export function estimateCarryover({
       geometry,
     });
 
-    // Compute one-term approximation fractionReached at the model's minutesToPeak
+    // Compute fractionReached using Bi→∞ eigenvalues (see CARRYOVER_EIGENVALUES).
+    // Biot-table values are still computed for physics card display.
     const Lc = characteristicLength(geometry, thicknessInches);
     const h_fd = isWrapped ? H_FOIL : H_OPEN;
     const Bi_fd = (h_fd * Lc) / K_MEAT;
@@ -530,7 +561,8 @@ export function estimateCarryover({
     const timeConstantSec     = (Lc * Lc) / alpha;
     const minutesToPeakEmpir  = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
     const Fo_empir            = (alpha * minutesToPeakEmpir * 60) / (Lc * Lc);
-    const thetaStar_fd        = A1_fd * Math.exp(-lam1_fd * lam1_fd * Fo_empir);
+    const carryEigen_fd       = CARRYOVER_EIGENVALUES[geometry] ?? CARRYOVER_EIGENVALUES.slab;
+    const thetaStar_fd        = carryEigen_fd.A1 * Math.exp(-carryEigen_fd.lambda1 * carryEigen_fd.lambda1 * Fo_empir);
     const fractionReachedEmpir = Math.max(0, Math.min(1, 1 - thetaStar_fd));
 
     // Penetration factor (same cascade as empirical path: method → category → default).
@@ -635,21 +667,28 @@ export function estimateCarryover({
   const surfaceGradient = surfaceTempAtPull - pullTempF;
 
   // ── Wet-bulb corrected ambient for boundary condition ───────────────────
-  const effectiveAmbient = effectiveAmbientF(ambientTempF, isWrapped, surfaceTempAtPull);
+  const effectiveAmbient = effectiveAmbientF(ambientTempF, isWrapped);
 
-  // ── One-term approximation: dimensionless center temperature ────────────
-  // θ* = A₁ · exp(−λ₁² · Fo)
+  // ── Internal heat redistribution fraction (Bi → ∞ eigenvalues) ─────────
+  // Carryover is driven by INTERNAL redistribution of the gradient deposited
+  // during cooking. This depends on geometry (slab/cylinder/sphere eigenvalues)
+  // but NOT on the surface Biot number — the carryover heat is already inside
+  // the meat; it's internal diffusion that carries it to the center.
   //
-  // θ* represents (T_center − T_∞) / (T_initial − T_∞) at dimensionless time Fo.
-  // We use it as the fraction of the initial gradient that has NOT yet reached the center,
-  // so fractionReached = 1 − θ*.
+  // The Biot-dependent λ₁/A₁ (from biotLookup) model cooling of a UNIFORM
+  // body toward ambient — a fundamentally different problem. At typical
+  // Bi ≈ 0.3, they give fractionReached ≈ 0.07 (vs ≈ 0.58 at Bi → ∞),
+  // producing <1°F carryover with the calibrated penetration factors.
   //
-  // This replaces the old hardcoded formula: 1 − exp(−π²·Fo/4)
-  // The one-term approximation is more accurate because:
-  //   1. λ₁ and A₁ are geometry-specific (slab vs cylinder vs sphere)
-  //   2. They account for the actual Biot number (surface boundary condition)
-  //   3. The old formula implicitly assumed Bi → ∞ (prescribed surface temp)
-  const thetaStar = A1 * Math.exp(-lambda1 * lambda1 * Fo);
+  // The Bi → ∞ eigenvalues are geometry-specific:
+  //   Slab:     λ₁ = π/2  → fractionReached ≈ 0.58 at Fo = 0.45
+  //   Cylinder: λ₁ = 2.40 → fractionReached ≈ 0.88 (radial convergence)
+  //   Sphere:   λ₁ = π    → fractionReached ≈ 0.98 (full 3D convergence)
+  //
+  // The Biot-table λ₁/A₁ are still displayed on the physics card for their
+  // educational value (they correctly describe the ongoing surface cooling).
+  const carryEigen = CARRYOVER_EIGENVALUES[geometry] ?? CARRYOVER_EIGENVALUES.slab;
+  const thetaStar = carryEigen.A1 * Math.exp(-carryEigen.lambda1 * carryEigen.lambda1 * Fo);
   const fractionReached = Math.max(0, Math.min(1, 1 - thetaStar));
 
   // ── Penetration factor ──────────────────────────────────────────────────
