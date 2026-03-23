@@ -62,44 +62,54 @@ const H_FOIL = 3;
 // ── Wet-bulb temperature depression ───────────────────────────────────────────
 
 /**
- * Estimate the effective ambient temperature at the meat surface during rest.
+ * Calculates the wet-bulb temperature using Stull's formula.
  *
- * During unwrapped rest, evaporative cooling (latent heat of vaporization of water,
- * ~2.26 MJ/kg) depresses the effective boundary condition below dry-bulb ambient.
- * The surface acts as a wet-bulb thermometer: moisture evaporating from the crust
- * absorbs energy that would otherwise conduct inward.
+ * This accounts for the evaporative cooling (latent heat of vaporization)
+ * at the meat's surface during the rest phase. The wet-bulb temperature is
+ * the equilibrium temperature a surface reaches when evaporative mass flux
+ * balances sensible heat gain — making it the correct boundary condition
+ * for an unwrapped, moist surface cooling in air.
  *
- * Model: T_effective = T_ambient − wetBulbDepression
+ * Reference: Stull, R. (2011). "Wet-Bulb Temperature from Relative Humidity
+ * and Air Temperature." Journal of Applied Meteorology and Climatology.
+ * Valid for RH 5–99%, T −20°C to 50°C. Accuracy ±0.3°C.
  *
- * The depression depends on:
- *   - Relative humidity (kitchen ~40–60% typical)
- *   - Surface moisture availability (high right after pull, decreasing as crust dries)
- *   - Air velocity (still air → lower evaporation rate)
+ * @param {number} tempF - Dry-bulb ambient temperature in °F
+ * @param {number} rh    - Relative humidity percentage (0–100)
+ * @returns {number} Wet-bulb temperature in °F
+ */
+function calculateWetBulbTempF(tempF, rh) {
+  const T = (tempF - 32) * 5 / 9;
+  const twbC = T * Math.atan(0.151977 * Math.pow(rh + 8.313659, 0.5))
+             + Math.atan(T + rh)
+             - Math.atan(rh - 1.676331)
+             + 0.00391838 * Math.pow(rh, 1.5) * Math.atan(0.023101 * rh)
+             - 4.686035;
+  return (twbC * 9 / 5) + 32;
+}
+
+/** Default kitchen relative humidity (%) for unwrapped rest. */
+const DEFAULT_KITCHEN_RH = 45;
+
+/**
+ * Compute the effective ambient temperature at the meat surface during rest.
  *
- * Default depression of 8°F corresponds to ~50% RH at 72°F dry-bulb.
- * Wrapped rest: depression ≈ 0 (trapped steam saturates the air, RH → 100%).
+ * During unwrapped rest, evaporative cooling depresses the effective boundary
+ * condition below dry-bulb ambient. We use Stull's wet-bulb equation to compute
+ * this rigorously rather than applying an ad-hoc fixed depression.
  *
- * When live probe data shows the outer sensor cooling faster than conduction alone
- * predicts, we can infer higher evaporative loss and increase the depression.
+ * - Wrapped: RH → 100% inside the foil tent. Stull's equation at RH=100 yields
+ *   T_wb ≈ T_dry — no evaporative depression (the vapor is already saturated).
+ * - Unwrapped: RH ≈ 45% (typical residential kitchen). At 72°F dry-bulb this
+ *   gives T_wb ≈ 60°F — a ~12°F depression that matches psychrometric charts.
  *
- * @param {number} ambientTempF  - Dry-bulb ambient temperature (°F)
- * @param {boolean} isWrapped    - Whether the meat is wrapped/tented
- * @param {number} [surfaceTempF] - Current surface temp (°F), used for enhanced model
+ * @param {number} ambientTempF - Dry-bulb ambient temperature (°F)
+ * @param {boolean} isWrapped   - Whether the meat is wrapped/tented
  * @returns {number} Effective ambient temperature at the surface boundary (°F)
  */
-function effectiveAmbientF(ambientTempF, isWrapped, surfaceTempF = null) {
-  if (isWrapped) return ambientTempF; // Saturated microclimate, no evaporative cooling
-
-  // Base wet-bulb depression at ~50% RH, scaled by surface-to-ambient ΔT.
-  // Hotter surface = more vigorous evaporation = deeper depression.
-  const baseDepression = 8; // °F at 50% RH, 72°F ambient
-  if (surfaceTempF != null && surfaceTempF > ambientTempF) {
-    // Scale depression: stronger when surface is much hotter (more moisture driven off)
-    const drivingDelta = surfaceTempF - ambientTempF;
-    const scale = Math.min(1.5, Math.max(0.5, drivingDelta / 80)); // normalized to ~80°F typical gradient
-    return ambientTempF - baseDepression * scale;
-  }
-  return ambientTempF - baseDepression;
+function effectiveAmbientF(ambientTempF, isWrapped) {
+  const rh = isWrapped ? 100 : DEFAULT_KITCHEN_RH;
+  return calculateWetBulbTempF(ambientTempF, rh);
 }
 
 // ── Biot Number Lookup Tables ─────────────────────────────────────────────────

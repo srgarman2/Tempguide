@@ -44,9 +44,36 @@ const H_OPEN = 10;
 /** Convective h for foil-tented rest — steam trap reduces convection, W/(m²·K) */
 const H_FOIL = 3;
 
+/** Default kitchen relative humidity (%) for unwrapped rest. */
+const DEFAULT_KITCHEN_RH = 45;
+
 /** Number of spatial nodes from center (0) to surface (N_NODES). Higher = more accurate
  *  but slower. N=20 gives sub-1°F spatial error and runs in ~2ms. */
 const N_NODES = 20;
+
+/**
+ * Calculates the wet-bulb temperature using Stull's formula.
+ *
+ * This accounts for the evaporative cooling (latent heat of vaporization)
+ * at the meat's surface during the rest phase. The wet-bulb temperature
+ * replaces dry-bulb ambient in the convective BC to properly model the
+ * evaporative mass flux that depresses the surface temperature.
+ *
+ * Reference: Stull (2011), JAMC. Valid for RH 5–99%, T −20°C to 50°C.
+ *
+ * @param {number} tempF - Dry-bulb ambient temperature in °F
+ * @param {number} rh    - Relative humidity percentage (0–100)
+ * @returns {number} Wet-bulb temperature in °F
+ */
+function calculateWetBulbTempF(tempF, rh) {
+  const T = (tempF - 32) * 5 / 9;
+  const twbC = T * Math.atan(0.151977 * Math.pow(rh + 8.313659, 0.5))
+             + Math.atan(T + rh)
+             - Math.atan(rh - 1.676331)
+             + 0.00391838 * Math.pow(rh, 1.5) * Math.atan(0.023101 * rh)
+             - 4.686035;
+  return (twbC * 9 / 5) + 32;
+}
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -140,7 +167,9 @@ export function simulateCarryover({
   const dx = L / N_NODES;
 
   // ── Boundary condition ────────────────────────────────────────────────────
-  const h = isWrapped ? H_FOIL : H_OPEN;
+  const h  = isWrapped ? H_FOIL : H_OPEN;
+  const rh = isWrapped ? 100 : DEFAULT_KITCHEN_RH;
+  const effectiveAmbientTempF = calculateWetBulbTempF(ambientTempF, rh);
 
   // ── Time step selection for stability ─────────────────────────────────────
   // Stability requires r = α·Δt/Δx² ≤ 0.4
@@ -173,11 +202,12 @@ export function simulateCarryover({
     }
 
     // Surface node — half-cell energy balance with convective BC
-    // ρ·cp·(Δx/2)·ΔT/Δt = k·(T[N-1]-T[N])/Δx − h·(T[N]−T_amb)
+    // ρ·cp·(Δx/2)·ΔT/Δt = k·(T[N-1]-T[N])/Δx − h·(T[N]−T_wb)
     // Using α = k/(ρ·cp) → ρ·cp = k/α:
-    // Tnew[N] = T[N] + 2r·[(T[N-1]-T[N]) − BiNode·(T[N]−T_amb)]
+    // Tnew[N] = T[N] + 2r·[(T[N-1]-T[N]) − BiNode·(T[N]−T_wb)]
+    // T_wb = wet-bulb temperature (Stull's equation) — models evaporative cooling
     Tnew[N_NODES] = T[N_NODES]
-      + 2 * r * ((T[N_NODES - 1] - T[N_NODES]) - BiNode * (T[N_NODES] - ambientTempF));
+      + 2 * r * ((T[N_NODES - 1] - T[N_NODES]) - BiNode * (T[N_NODES] - effectiveAmbientTempF));
 
     // Swap buffers
     [T, Tnew] = [Tnew, T];
