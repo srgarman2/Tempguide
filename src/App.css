@@ -535,6 +535,47 @@ html, body, #root {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Geometry Selector ──────────────────────────────────────────────────── */
+.geometry-section {
+  padding: 0 20px;
+  margin-bottom: 16px;
+  position: relative;
+  z-index: 1;
+}
+.geometry-section h4 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.geometry-selector {
+  display: flex;
+  gap: 8px;
+}
+.geometry-chip {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: 40px;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  text-align: center;
+}
+.geometry-chip:hover {
+  background: var(--surface-hover);
+}
+.geometry-chip--active {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
 /* ── Cook Screen ──────────────────────────────────────────────────────────── */
 .cook-screen {
   min-height: 100%;

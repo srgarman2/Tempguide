@@ -22,6 +22,7 @@ const DEFAULT_SELECTION = {
   donenessIndex:   null, // Index into item.doneness[]
   methodId:        null,
   thicknessInches: 1.0,
+  geometry:        'slab', // Cut shape: 'slab' | 'tapered' | 'cylinder'
 };
 
 export default function App() {

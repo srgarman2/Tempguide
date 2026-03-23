@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { getCategoryById, getItemById, COOKING_METHODS } from '../data/temperatures';
-import { estimateCarryover } from '../utils/carryover';
+import { estimateCarryover, GEOMETRY_TYPES } from '../utils/carryover';
 import NavBar from './NavBar';
 
 // Slider label positions — must match actual slider range (0.5–3.0)
@@ -14,6 +14,7 @@ const SLIDER_LABELS = [
 
 export default function CookingMethodScreen({ selection, navigate, goBack, SCREENS }) {
   const [thickness, setThickness] = useState(selection.thicknessInches ?? 1.0);
+  const [geometry, setGeometry] = useState(selection.geometry ?? 'slab');
 
   const category = getCategoryById(selection.categoryId);
   const item = getItemById(selection.categoryId, selection.itemId);
@@ -37,8 +38,10 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
   );
 
   const handleProceed = (methodId) => {
-    navigate(SCREENS.COOK, { methodId, thicknessInches: thickness });
+    navigate(SCREENS.COOK, { methodId, thicknessInches: thickness, geometry });
   };
+
+  const showGeometrySelector = selection.categoryId === 'beef' || selection.categoryId === 'pork';
 
   return (
     <div className="screen method-screen" style={{ '--accent': category.accentColor }}>
@@ -85,6 +88,25 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
         </div>
       )}
 
+      {/* Geometry selector — cut shape affects carryover. Shown for beef & pork only. */}
+      {showGeometrySelector && (
+        <div className="geometry-section">
+          <h4>Shape</h4>
+          <div className="geometry-selector">
+            {Object.entries(GEOMETRY_TYPES).map(([key, { label }]) => (
+              <button
+                key={key}
+                className={`geometry-chip${geometry === key ? ' geometry-chip--active' : ''}`}
+                onClick={() => setGeometry(key)}
+                style={geometry === key ? { borderColor: category.accentColor, color: category.accentColor } : {}}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="method-grid">
         {availableMethods.map(method => {
           // Preview carryover for this method
@@ -94,6 +116,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
             thicknessInches: thickness,
             restMinutes: 10,
             categoryId: selection.categoryId,
+            geometry,
           });
 
           return (

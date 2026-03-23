@@ -71,6 +71,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     restMinutes,
     thicknessInches: selection.thicknessInches,
     categoryId: selection.categoryId,
+    geometry: selection.geometry ?? 'slab',
     actualCoreTempF: selection.actualCoreTempF ?? null,
     actualSurfaceTempF: selection.actualSurfaceTempF ?? null,
     ambientTempF: selection.actualAmbientTempF ?? 72,

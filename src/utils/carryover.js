@@ -42,6 +42,61 @@ const ALPHA = 1.36e-7;
 const ALPHA_POTATO = 1.4e-7;
 
 /**
+ * Method-specific penetration factor overrides.
+ *
+ * Most methods use the category-based default (mammalian 0.28, seafood 0.80, etc.)
+ * but some methods fundamentally change the surface boundary condition during rest:
+ *
+ *   basting-flip: Hot butter film (~320–350°F) acts as a thermal reservoir that
+ *     persists AFTER the steak is pulled. Unlike pan-sear where the surface cools
+ *     to air immediately, basting keeps the surface hot → more heat conducts inward.
+ *
+ *     decayPerInch: the butter film cools in ~2–3 minutes regardless of meat thickness.
+ *     For thin cuts that's enough time for heat to fully penetrate; for thick cuts it's
+ *     not. The pf decays exponentially from the baseline starting at 0.5":
+ *       pf_effective = pf × exp(-decay × max(0, thicknessInches - 0.5))
+ *     Calibrated: 0.5" → ~19°F, 1.0" → ~13°F, 1.5" → ~11°F, 2.0" → ~8°F
+ */
+const METHOD_PF_OVERRIDE = {
+  'basting-flip': { unwrapped: 0.38, wrapped: 0.55, decayPerInch: 0.45 },
+};
+
+/**
+ * Methods where thickness scaling of the surface gradient should be suppressed.
+ *
+ * Thickness scaling (√thicknessInches) models the deeper gradient that builds in
+ * thick cuts during long high-heat cooks. Correct for oven, grill, pan-sear where
+ * cook time scales with thickness.
+ *
+ * Wrong for methods where the surface heat source is thickness-independent:
+ *   - basting-flip: butter temp is ~320°F regardless of steak thickness
+ *   - boil: water is 212°F regardless of potato size (carryover is 0 anyway)
+ *   - sous-vide: bath temp is uniform (already handled by early return)
+ */
+const SUPPRESS_THICKNESS_SCALE = new Set(['basting-flip', 'boil', 'sous-vide']);
+
+/**
+ * Geometry correction factors for the penetration factor.
+ *
+ * The base model assumes infinite slab geometry (L = half-thickness).
+ * Real cuts have different surface-area-to-volume ratios that affect
+ * how much of the surface gradient conducts inward vs. escapes to air.
+ *
+ *   slab (default): 1.00 — flat steaks, chops, fillets
+ *   tapered: 0.80 — tri-tip, flank with variable thickness.
+ *     Higher S/V at the thin end → more heat escapes. The thick-end
+ *     carryover is less than a uniform slab at the same max thickness.
+ *   cylinder: 1.10 — tenderloin, sausage, rolled roasts.
+ *     Radial conduction from all sides (not just top/bottom) delivers
+ *     more heat to center. Effective Fo is higher for same L.
+ */
+export const GEOMETRY_TYPES = {
+  slab:     { label: 'Flat',     factor: 1.00 },
+  tapered:  { label: 'Tapered',  factor: 0.80 },
+  cylinder: { label: 'Cylinder', factor: 1.10 },
+};
+
+/**
  * Estimated surface temperature at moment of removal from heat source.
  * This drives the inward heat flux during rest.
  * Values are calibrated empirically.
@@ -77,7 +132,8 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
     'basting-flip':   65,   // Continuous hot-butter basting (~320–350°F) persists AFTER pull;
                             // residual surface heat drives 15–20°F rise in thin cuts.
                             // Chris Young empirical: "up to 20°F" for small/thin steaks.
-                            // Calibrated: 0.5" → ~18°F, 1.0" → ~15°F, 1.5" → ~9°F.
+                            // pf override (0.38) + no thickness scaling → monotonic decrease:
+                            // 0.5" → ~19°F, 1.0" → ~16.5°F, 1.5" → ~10°F, 2.0" → ~7°F.
     'air-fryer':      25,   // High-convection, similar to oven-moderate
   };
   const excess = surfaceExcessF[methodId] ?? 45;
@@ -143,6 +199,8 @@ export function estimateCarryover({
   sensorGradientF = null,  // Full probe gradient: [T_core, ..., T_surface] in °F.
                            // When provided (≥2 values), runs a finite-difference simulation
                            // instead of the empirical formula — no calibration factors needed.
+  geometry = 'slab',       // Cut shape: 'slab' | 'tapered' | 'cylinder'. Adjusts penetration
+                           // factor via GEOMETRY_TYPES correction (e.g. tri-tip → tapered).
 }) {
   // Category-specific thermal diffusivity
   // Potato has a slightly higher diffusivity than muscle tissue due to its starch-water matrix.
@@ -200,13 +258,23 @@ export function estimateCarryover({
     const Fo_empir            = (alpha * minutesToPeakEmpir * 60) / (Lc * Lc);
     const fractionReachedEmpir = 1 - Math.exp(-Math.PI * Math.PI * Fo_empir / 4);
 
-    // Penetration factor (same as empirical path).
+    // Penetration factor (same cascade as empirical path: method → category → default).
     let pf;
-    if (categoryId === 'seafood') {
+    const fdMethodOverride = METHOD_PF_OVERRIDE[methodId];
+    if (fdMethodOverride) {
+      pf = isWrapped ? fdMethodOverride.wrapped : fdMethodOverride.unwrapped;
+      if (fdMethodOverride.decayPerInch) {
+        pf *= Math.exp(-fdMethodOverride.decayPerInch * Math.max(0, thicknessInches - 0.5));
+      }
+    } else if (categoryId === 'seafood') {
       pf = isWrapped ? 0.85 : 0.80;
+    } else if (categoryId === 'potato') {
+      pf = isWrapped ? 0.30 : 0.22;
     } else {
       pf = isWrapped ? 0.50 : 0.28;
     }
+    // Apply geometry correction
+    pf *= (GEOMETRY_TYPES[geometry]?.factor ?? 1.0);
 
     // FD effective fraction: how much of the surface gradient the 1D simulation
     // predicts conducts inward. Over-predicts vs 3D reality.
@@ -282,7 +350,9 @@ export function estimateCarryover({
   //   Thin cuts (≤1") keep their existing behaviour (the minutesToPeak floor at 3 min
   //   already pushes Fo above 0.45 and slightly raises their fractionReached).
   const modelledSurfaceTemp  = estimateSurfaceTempAtPull(methodId, pullTempF);
-  const thicknessScale       = Math.max(1.0, Math.sqrt(thicknessInches)); // ≥1" only
+  const thicknessScale       = SUPPRESS_THICKNESS_SCALE.has(methodId)
+    ? 1.0  // Surface heat source is thickness-independent (e.g. butter temp, water temp)
+    : Math.max(1.0, Math.sqrt(thicknessInches)); // ≥1" only
   const scaledSurfaceTemp    = pullTempF + (modelledSurfaceTemp - pullTempF) * thicknessScale;
   const surfaceDataSource = overrideSurfaceTempF != null ? 'measured' : 'modeled';
   const surfaceTempAtPull = overrideSurfaceTempF ?? scaledSurfaceTemp;
@@ -304,8 +374,18 @@ export function estimateCarryover({
   //   Seafood 0.85 — minimal practical change (rarely wrapped)
   //   Mammalian/avian 0.50 — reflects reduced surface loss during foil rest;
   //     conservative: a cambro/cooler brisket rest can reach even higher.
+  // Penetration factor cascade: method override → category default.
+  // Method overrides capture unique surface boundary conditions (e.g. basting butter film).
   let penetrationFactor;
-  if (categoryId === 'seafood') {
+  const methodOverride = METHOD_PF_OVERRIDE[methodId];
+  if (methodOverride) {
+    penetrationFactor = isWrapped ? methodOverride.wrapped : methodOverride.unwrapped;
+    // Thickness-dependent decay: the butter film cools in ~2–3 min regardless of meat
+    // thickness, so its effectiveness decays with distance from surface.
+    if (methodOverride.decayPerInch) {
+      penetrationFactor *= Math.exp(-methodOverride.decayPerInch * Math.max(0, thicknessInches - 0.5));
+    }
+  } else if (categoryId === 'seafood') {
     penetrationFactor = isWrapped ? 0.85 : 0.80;
   } else if (categoryId === 'potato') {
     // Dense starchy sphere: moderate water content but thick skin and low surface gradient
@@ -315,6 +395,11 @@ export function estimateCarryover({
   } else {
     penetrationFactor = isWrapped ? 0.50 : 0.28;
   }
+
+  // Apply geometry correction — tapered cuts (tri-tip) lose more heat from edges,
+  // cylindrical cuts (tenderloin) gain from radial conduction.
+  const geoFactor = GEOMETRY_TYPES[geometry]?.factor ?? 1.0;
+  penetrationFactor *= geoFactor;
 
   const rawCarryover = surfaceGradient * fractionReached * penetrationFactor;
 
@@ -345,6 +430,8 @@ export function estimateCarryover({
     halfThicknessM: Math.round(L * 10000) / 10000,
     thermalDiffusivity: alpha,
     surfaceDataSource,
+    geometry,
+    geometryFactor: geoFactor,
   };
 }
 
