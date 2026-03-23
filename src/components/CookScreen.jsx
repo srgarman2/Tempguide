@@ -419,6 +419,10 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <span className="val">{selection.thicknessInches}"</span>
             </div>
             <div className="carryover-row">
+              <span className="label">Biot number (Bi)</span>
+              <span className="val">{co.biot}</span>
+            </div>
+            <div className="carryover-row">
               <span className="label">Fourier number (Fo)</span>
               <span className="val">{co.fourier}</span>
             </div>
