@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover, formatTemp, getCookStatus } from '../utils/carryover';
+import { estimateMicrowaveTime } from '../utils/microwaveTime';
 import { THERMOMETER_STATE } from '../constants/thermometer';
 import useCookHistory from '../hooks/useCookHistory';
 import NavBar from './NavBar';
@@ -506,6 +507,42 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
             <strong>Tip — {method.label}:</strong> {method.tip}
           </div>
         )}
+
+        {/* Microwave time estimate — The Jeff Special only */}
+        {method.id === 'jeff-special' && displayPullTemp != null && (() => {
+          const mw = estimateMicrowaveTime({
+            pullTempF: displayPullTemp,
+            thicknessInches: selection.thicknessInches,
+            categoryId: selection.categoryId,
+          });
+          return (
+            <div className="cook-card" style={{ borderLeft: '3px solid #f5a623' }}>
+              <div className="cook-card-header">
+                <span className="cook-card-title">☢️ Estimated Microwave Time</span>
+                <span className="cook-card-value" style={{ color: '#f5a623' }}>
+                  {mw.rangeLow === mw.rangeHigh
+                    ? `${mw.rangeLow} min`
+                    : `${mw.rangeLow}–${mw.rangeHigh} min`}
+                </span>
+              </div>
+              <div className="carryover-row">
+                <span className="label">Power</span>
+                <span className="val">1000W · Covered</span>
+              </div>
+              <div className="carryover-row">
+                <span className="label">Thickness</span>
+                <span className="val">{selection.thicknessInches}"</span>
+              </div>
+              <div className="carryover-row">
+                <span className="label">Target pull temp</span>
+                <span className="val">{displayPullTemp}°F</span>
+              </div>
+              <p style={{ fontSize: 12, color: 'rgba(240,240,240,0.5)', marginTop: 8, lineHeight: 1.5 }}>
+                {mw.note} Use a thermometer — microwave times are approximate due to hot spots and wattage variation.
+              </p>
+            </div>
+          );
+        })()}
 
         {/* Wrap temp for brisket/shoulder */}
         {item.wrapTemp && (
