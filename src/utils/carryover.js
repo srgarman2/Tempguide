@@ -203,6 +203,9 @@ export function estimateCarryover({
                            // instead of the empirical formula — no calibration factors needed.
   geometry = 'slab',       // Cut shape: 'slab' | 'tapered' | 'cylinder'. Adjusts penetration
                            // factor via GEOMETRY_TYPES correction (e.g. tri-tip → tapered).
+  boneIn = false,          // Bone-in cut. Bone has ~⅓ the thermal conductivity of muscle,
+                           // insulating one side → less heat conducts inward from that face.
+                           // Reduces effective penetration factor by ~15%.
 }) {
   // Category-specific thermal diffusivity
   // Potato has a slightly higher diffusivity than muscle tissue due to its starch-water matrix.
@@ -277,6 +280,8 @@ export function estimateCarryover({
     }
     // Apply geometry correction
     pf *= (GEOMETRY_TYPES[geometry]?.factor ?? 1.0);
+    // Bone-in correction (same as empirical path)
+    if (boneIn) pf *= 0.85;
 
     // FD effective fraction: how much of the surface gradient the 1D simulation
     // predicts conducts inward. Over-predicts vs 3D reality.
@@ -402,6 +407,14 @@ export function estimateCarryover({
   // cylindrical cuts (tenderloin) gain from radial conduction.
   const geoFactor = GEOMETRY_TYPES[geometry]?.factor ?? 1.0;
   penetrationFactor *= geoFactor;
+
+  // Bone-in correction: bone has thermal conductivity ~0.5 W/(m·K) vs muscle ~0.5 W/(m·K)
+  // at low temp, but cortical bone is ~0.3 W/(m·K) — effectively insulating one face of the
+  // roast. For a cylindrical rib roast, the bone side (~30% of circumference) conducts ~40%
+  // less heat inward → net reduction of ~12–15% in effective penetration.
+  if (boneIn) {
+    penetrationFactor *= 0.85;
+  }
 
   const rawCarryover = surfaceGradient * fractionReached * penetrationFactor;
 

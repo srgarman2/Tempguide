@@ -49,6 +49,8 @@ export default function useRestTimer({
   thicknessInches = 1.0,
   categoryId = 'beef',
   geometry = 'slab',
+  isWrapped = false,
+  boneIn = false,
   actualCoreTempF = null,
   actualSurfaceTempF = null,
   ambientTempF = 72,
@@ -88,7 +90,7 @@ export default function useRestTimer({
   // ── Initial carryover (computed once at mount, same as before) ──────
   const initialCarryover = useMemo(() => {
     if (methodId === 'sous-vide') {
-      return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId, ambientTempF, geometry });
+      return estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId, ambientTempF, geometry, isWrapped, boneIn });
     }
 
     // Path A-FD: finite-difference simulation from full probe gradient
@@ -102,6 +104,8 @@ export default function useRestTimer({
         ambientTempF,
         sensorGradientF,
         geometry,
+        isWrapped,
+        boneIn,
       });
     }
 
@@ -116,14 +120,16 @@ export default function useRestTimer({
         overrideSurfaceTempF: actualSurfaceTempF,
         ambientTempF,
         geometry,
+        isWrapped,
+        boneIn,
       });
     }
 
     // Path B: model-driven — calibrate profile to peak at endTempF
-    const { deltaF } = estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId, ambientTempF, geometry });
+    const { deltaF } = estimateCarryover({ methodId, pullTempF, thicknessInches, restMinutes, categoryId, ambientTempF, geometry, isWrapped, boneIn });
     const adjustedPull = endTempF != null ? Math.round(endTempF - deltaF) : pullTempF;
-    return estimateCarryover({ methodId, pullTempF: adjustedPull, thicknessInches, restMinutes, categoryId, ambientTempF, geometry });
-  }, [methodId, pullTempF, endTempF, thicknessInches, categoryId, geometry,
+    return estimateCarryover({ methodId, pullTempF: adjustedPull, thicknessInches, restMinutes, categoryId, ambientTempF, geometry, isWrapped, boneIn });
+  }, [methodId, pullTempF, endTempF, thicknessInches, categoryId, geometry, isWrapped, boneIn,
       actualCoreTempF, actualSurfaceTempF, ambientTempF, sensorGradientF, restMinutes]);
 
   // The effective pull temp shown in UI:
@@ -237,6 +243,8 @@ export default function useRestTimer({
         ambientTempF: currentAmbient,
         sensorGradientF: gradient,
         geometry,
+        isWrapped,
+        boneIn,
       });
 
       // Offset the forward profile's minutes to absolute time (from pull)

@@ -23,6 +23,8 @@ const DEFAULT_SELECTION = {
   methodId:        null,
   thicknessInches: 1.0,
   geometry:        'slab', // Cut shape: 'slab' | 'tapered' | 'cylinder'
+  boneIn:          false,  // Bone-in cut (reduces carryover)
+  isWrapped:       false,  // Foil / butcher paper rest (increases carryover)
 };
 
 export default function App() {

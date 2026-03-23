@@ -86,6 +86,8 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         categoryId: selection.categoryId,
         ambientTempF,
         geometry: selection.geometry,
+        isWrapped: selection.isWrapped,
+        boneIn: selection.boneIn,
       });
     }
     const { deltaF } = estimateCarryover({
@@ -96,6 +98,8 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       categoryId: selection.categoryId,
       ambientTempF,
       geometry: selection.geometry,
+      isWrapped: selection.isWrapped,
+      boneIn: selection.boneIn,
     });
     const adjustedPull = effectiveEndTemp != null ? Math.round(effectiveEndTemp - deltaF) : (rawPullTemp ?? 125);
     return estimateCarryover({
@@ -106,8 +110,10 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       categoryId: selection.categoryId,
       ambientTempF,
       geometry: selection.geometry,
+      isWrapped: selection.isWrapped,
+      boneIn: selection.boneIn,
     });
-  }, [selection.methodId, selection.categoryId, rawPullTemp, effectiveEndTemp, selection.thicknessInches, selection.geometry, restMinutes, method.id, ambientTempF]);
+  }, [selection.methodId, selection.categoryId, rawPullTemp, effectiveEndTemp, selection.thicknessInches, selection.geometry, selection.isWrapped, selection.boneIn, restMinutes, method.id, ambientTempF]);
 
   // For sous vide: pull = bath = target. For others: pull = endTemp − carryover.
   const displayPullTemp = method.id === 'sous-vide'
@@ -157,6 +163,8 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       sensorGradientF: liveGradient,            // triggers FD when available
       ambientTempF,
       geometry: selection.geometry,
+      isWrapped: selection.isWrapped,
+      boneIn: selection.boneIn,
     });
 
     const projectedPeak   = Math.round((currentTemp + preview.deltaF) * 10) / 10;
@@ -182,7 +190,8 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     return { preview, projectedPeak, deltaFromTarget, verdict, verdictColor, verdictIcon, surfaceSource, liveSurfaceTemp, liveGradient };
   }, [
     method.id, currentTemp, selection.methodId, selection.categoryId,
-    selection.thicknessInches, selection.geometry, restMinutes, effectiveEndTemp,
+    selection.thicknessInches, selection.geometry, selection.isWrapped, selection.boneIn,
+    restMinutes, effectiveEndTemp,
     thermo.surfaceTemp, thermo.sensors, thermo.virtualCoreIndex,
     thermo.virtualSurfaceIndex, thermo.isInstantRead, isConnected, ambientTempF,
   ]);

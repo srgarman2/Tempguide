@@ -3,8 +3,8 @@ import { getCategoryById, getItemById, COOKING_METHODS } from '../data/temperatu
 import { estimateCarryover, GEOMETRY_TYPES } from '../utils/carryover';
 import NavBar from './NavBar';
 
-// Slider label positions — must match actual slider range (0.5–3.0)
-const SLIDER_LABELS = [
+// Default slider label positions (0.5–3.0) — used when item has no custom range
+const DEFAULT_SLIDER_LABELS = [
   { label: '½"', value: 0.5 },
   { label: '1"', value: 1.0 },
   { label: '1½"', value: 1.5 },
@@ -13,12 +13,21 @@ const SLIDER_LABELS = [
 ];
 
 export default function CookingMethodScreen({ selection, navigate, goBack, SCREENS }) {
-  const [thickness, setThickness] = useState(selection.thicknessInches ?? 1.0);
-  const [geometry, setGeometry] = useState(selection.geometry ?? 'slab');
-
   const category = getCategoryById(selection.categoryId);
   const item = getItemById(selection.categoryId, selection.itemId);
   if (!category || !item) return null;
+
+  // Item-driven slider range or defaults
+  const sliderMin     = item.sliderMin     ?? 0.5;
+  const sliderMax     = item.sliderMax     ?? 3.0;
+  const sliderStep    = item.sliderStep    ?? 0.25;
+  const sliderDefault = item.sliderDefault ?? 1.0;
+  const sliderLabels  = item.sliderLabels  ?? DEFAULT_SLIDER_LABELS;
+
+  const [thickness, setThickness] = useState(selection.thicknessInches ?? sliderDefault);
+  const [geometry, setGeometry]   = useState(selection.geometry ?? (item.defaultGeometry ?? 'slab'));
+  const [boneIn, setBoneIn]       = useState(selection.boneIn ?? false);
+  const [isWrapped, setIsWrapped] = useState(selection.isWrapped ?? false);
 
   const doneness = item.hasDoneness && selection.donenessIndex != null
     ? item.doneness[selection.donenessIndex]
@@ -38,10 +47,10 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
   );
 
   const handleProceed = (methodId) => {
-    navigate(SCREENS.COOK, { methodId, thicknessInches: thickness, geometry });
+    navigate(SCREENS.COOK, { methodId, thicknessInches: thickness, geometry, boneIn, isWrapped });
   };
 
-  const showGeometrySelector = selection.categoryId === 'beef' || selection.categoryId === 'pork';
+  const showGeometrySelector = !item.hasBoneInOption && (selection.categoryId === 'beef' || selection.categoryId === 'pork');
 
   return (
     <div className="screen method-screen" style={{ '--accent': category.accentColor }}>
@@ -62,21 +71,21 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
             <div className="thickness-value">{thickness.toFixed(1)}"</div>
             <input
               type="range"
-              min="0.5"
-              max="3.0"
-              step="0.25"
+              min={sliderMin}
+              max={sliderMax}
+              step={sliderStep}
               value={thickness}
               onChange={e => setThickness(parseFloat(e.target.value))}
               style={{ accentColor: category.accentColor }}
             />
-            {/* Labels positioned to match actual slider positions (0.5–3.0 range) */}
+            {/* Labels positioned to match actual slider positions */}
             <div className="thickness-labels" style={{ position: 'relative', height: 16 }}>
-              {SLIDER_LABELS.map(({ label, value }) => (
+              {sliderLabels.map(({ label, value }) => (
                 <span
                   key={value}
                   style={{
                     position: 'absolute',
-                    left: `${((value - 0.5) / 2.5) * 100}%`,
+                    left: `${((value - sliderMin) / (sliderMax - sliderMin)) * 100}%`,
                     transform: 'translateX(-50%)',
                   }}
                 >
@@ -85,6 +94,62 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Bone-in / Boneless selector — shown for items that support it (e.g. Prime Rib) */}
+      {item.hasBoneInOption && (
+        <div className="geometry-section">
+          <h4>Bone</h4>
+          <div className="geometry-selector">
+            <button
+              className={`geometry-chip${boneIn ? ' geometry-chip--active' : ''}`}
+              onClick={() => setBoneIn(true)}
+              style={boneIn ? { borderColor: category.accentColor, color: category.accentColor } : {}}
+            >
+              🦴 Bone-In
+            </button>
+            <button
+              className={`geometry-chip${!boneIn ? ' geometry-chip--active' : ''}`}
+              onClick={() => setBoneIn(false)}
+              style={!boneIn ? { borderColor: category.accentColor, color: category.accentColor } : {}}
+            >
+              Boneless
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: 'rgba(240,240,240,0.4)', marginTop: 4, textAlign: 'center' }}>
+            {boneIn
+              ? 'Bone insulates one side — slower heat transfer, more uneven gradient, less carryover.'
+              : 'Even exposure on all sides — faster heat transfer, more uniform carryover.'}
+          </p>
+        </div>
+      )}
+
+      {/* Wrapped rest toggle — shown for cuts with meaningful rest time */}
+      {((doneness?.restMinutes ?? item.restMinutes ?? 0) >= 15 || item.restRangeMinutes || doneness?.restRangeMinutes) && selection.categoryId !== 'baked' && (
+        <div className="geometry-section">
+          <h4>Rest Method</h4>
+          <div className="geometry-selector">
+            <button
+              className={`geometry-chip${!isWrapped ? ' geometry-chip--active' : ''}`}
+              onClick={() => setIsWrapped(false)}
+              style={!isWrapped ? { borderColor: category.accentColor, color: category.accentColor } : {}}
+            >
+              Unwrapped
+            </button>
+            <button
+              className={`geometry-chip${isWrapped ? ' geometry-chip--active' : ''}`}
+              onClick={() => setIsWrapped(true)}
+              style={isWrapped ? { borderColor: category.accentColor, color: category.accentColor } : {}}
+            >
+              🌯 Wrapped / Tented
+            </button>
+          </div>
+          <p style={{ fontSize: 11, color: 'rgba(240,240,240,0.4)', marginTop: 4, textAlign: 'center' }}>
+            {isWrapped
+              ? 'Foil or butcher paper traps surface heat — more carryover. Account for this in pull temp.'
+              : 'Open-air rest — surface cools freely, less heat conducts inward.'}
+          </p>
         </div>
       )}
 
@@ -117,6 +182,8 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
             restMinutes: 10,
             categoryId: selection.categoryId,
             geometry,
+            isWrapped,
+            boneIn,
           });
 
           return (
