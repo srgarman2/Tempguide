@@ -59,6 +59,7 @@ const ALPHA_POTATO = 1.4e-7;
  */
 const METHOD_PF_OVERRIDE = {
   'basting-flip': { unwrapped: 0.38, wrapped: 0.55, decayPerInch: 0.45 },
+  'jeff-special': { unwrapped: 0.50, wrapped: 0.50 },
 };
 
 /**
@@ -73,7 +74,7 @@ const METHOD_PF_OVERRIDE = {
  *   - boil: water is 212°F regardless of potato size (carryover is 0 anyway)
  *   - sous-vide: bath temp is uniform (already handled by early return)
  */
-const SUPPRESS_THICKNESS_SCALE = new Set(['basting-flip', 'boil', 'sous-vide']);
+const SUPPRESS_THICKNESS_SCALE = new Set(['basting-flip', 'boil', 'sous-vide', 'jeff-special']);
 
 /**
  * Geometry correction factors for the penetration factor.
@@ -129,6 +130,7 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
     'grill-medium':   30,   // Medium grill — contact + radiant heat
     'grill-high':     45,   // High heat grill — steeper gradient than oven
     'pan-sear':       40,   // Hot pan: effective sub-surface gradient ~40°F above center
+    'jeff-special':   15,   // Volumetric heating + trapped steam caps the surface gradient
     'basting-flip':   65,   // Continuous hot-butter basting (~320–350°F) persists AFTER pull;
                             // residual surface heat drives 15–20°F rise in thin cuts.
                             // Chris Young empirical: "up to 20°F" for small/thin steaks.
