@@ -61,13 +61,13 @@ export const COOKING_METHODS = [
   {
     id: 'sear-and-bake',
     label: 'Sear & Bake',
-    description: 'Hot pan sear → finish in 400°F oven',
+    description: 'Hot pan sear → finish in 350°F oven',
     icon: '🫕',
-    effectiveHeatF: 450,
-    carryoverCoeff: 0.13,
+    effectiveHeatF: 425,
+    carryoverCoeff: 0.11,
     appliesCarryover: true,
     compatibleCategories: ['beef', 'pork'],
-    tip: 'Sear in a screaming hot cast iron or stainless steel pan (1–2 min/side), then transfer the pan to a 375–425°F oven to finish. The sear creates a deep thermal gradient and the oven extends it — expect 10–15°F carryover on thick cuts. Pull 10–15°F below target.',
+    tip: 'Sear in a screaming hot cast iron or stainless steel pan (1–2 min/side), then transfer the pan to a 325–375°F oven to finish. The sear creates a deep thermal gradient and the moderate oven extends it — expect 8–12°F carryover on thick cuts. Pull 8–12°F below target.',
   },
   {
     id: 'oven-moderate',
