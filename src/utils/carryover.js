@@ -433,6 +433,10 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
                             // pf override (0.53) + no thickness scaling + decay from 1.0":
                             // 0.5" → ~25°F, 0.75" → ~20°F, 1.0" → ~20°F, 2.0" → ~13°F.
     'air-fryer':      25,   // High-convection, similar to oven-moderate
+    'sear-and-bake':  38,   // Sear creates steep surface gradient; oven deepens it but surface
+                            // cools slightly vs pure pan-sear. Net: deeper stored heat than
+                            // oven-high alone, but less surface-intense than continuous pan-sear.
+                            // Expected 10–15°F rise for 1–1.5" cuts.
   };
   const excess = surfaceExcessF[methodId] ?? 45;
   return pullTempF + excess;

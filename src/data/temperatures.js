@@ -59,6 +59,17 @@ export const COOKING_METHODS = [
     tip: 'Cook at 250°F until 10–15°F below target. Rest briefly, then sear at maximum heat for 45–60 sec/side. Minimal carryover makes this the most predictable method.',
   },
   {
+    id: 'sear-and-bake',
+    label: 'Sear & Bake',
+    description: 'Hot pan sear → finish in 400°F oven',
+    icon: '🫕',
+    effectiveHeatF: 450,
+    carryoverCoeff: 0.13,
+    appliesCarryover: true,
+    compatibleCategories: ['beef', 'pork'],
+    tip: 'Sear in a screaming hot cast iron or stainless steel pan (1–2 min/side), then transfer the pan to a 375–425°F oven to finish. The sear creates a deep thermal gradient and the oven extends it — expect 10–15°F carryover on thick cuts. Pull 10–15°F below target.',
+  },
+  {
     id: 'oven-moderate',
     label: 'Oven (Moderate)',
     description: '325–375°F oven',
@@ -166,7 +177,7 @@ export const CATEGORIES = [
         label: 'Steak',
         description: 'Any whole-muscle beef steak',
         hasDoneness: true,
-        compatibleMethods: ['pan-sear', 'basting-flip', 'grill-high', 'grill-medium', 'reverse-sear', 'sous-vide', 'jeff-special'],
+        compatibleMethods: ['pan-sear', 'basting-flip', 'sear-and-bake', 'grill-high', 'grill-medium', 'reverse-sear', 'sous-vide', 'jeff-special'],
         doneness: [
           {
             level: 'Bleu',
@@ -347,7 +358,7 @@ export const CATEGORIES = [
         label: 'Pork Chop / Loin',
         description: 'Chops, tenderloin, loin roasts',
         hasDoneness: true,
-        compatibleMethods: ['pan-sear', 'grill-high', 'grill-medium', 'reverse-sear', 'oven-moderate', 'sous-vide', 'jeff-special'],
+        compatibleMethods: ['pan-sear', 'sear-and-bake', 'grill-high', 'grill-medium', 'reverse-sear', 'oven-moderate', 'sous-vide', 'jeff-special'],
         doneness: [
           {
             level: 'Juicy (Kenji)',
