@@ -48,16 +48,57 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
 
   // Extract core-to-surface gradient slice from the full sensor snapshot captured at pull.
   // sensorReadingsAtPull is all 8 sensor temps; we slice from virtualCore to virtualSurface (inclusive).
-  const sensorGradientF = (
-    selection.sensorReadingsAtPull != null &&
-    selection.virtualCoreIndexAtPull != null &&
-    selection.virtualSurfaceIndexAtPull != null
-  ) ? selection.sensorReadingsAtPull.slice(
-      selection.virtualCoreIndexAtPull,
-      selection.virtualSurfaceIndexAtPull + 1
-    ) : null;
+  // Expected shape: sensorTempsF[0] = core (coldest), sensorTempsF[last] = surface (hottest).
+  const sensorGradientF = (() => {
+    if (
+      selection.sensorReadingsAtPull == null ||
+      selection.virtualCoreIndexAtPull == null ||
+      selection.virtualSurfaceIndexAtPull == null
+    ) return null;
+
+    const sensors = selection.sensorReadingsAtPull;
+    const coreIdx = selection.virtualCoreIndexAtPull;
+    const surfIdx = selection.virtualSurfaceIndexAtPull;
+
+    // Normal case: core and surface are distinct sensors.
+    const normalSlice = sensors.slice(coreIdx, surfIdx + 1);
+    if (normalSlice.length >= 2) return normalSlice;
+
+    // Degenerate case: Combustion assigned core === surface (e.g. thin chicken breast).
+    // The stored heat is distributed across the FULL probe span. Try both directions
+    // from the core sensor and use whichever side has the larger temperature spread
+    // — that side represents the sear surface driving carryover.
+    // T8 (index 7) is the ambient sensor; exclude it from internal gradient estimation.
+    const ambientIdx = sensors.length - 1;
+
+    // Toward T1 (lower indices = sear-side tip, reversed so core is first)
+    const lowerSlice = coreIdx > 0
+      ? sensors.slice(0, coreIdx + 1).reverse()
+      : [];
+
+    // Toward T7 (higher indices, stop before ambient T8)
+    const upperSlice = coreIdx < ambientIdx - 1
+      ? sensors.slice(coreIdx, ambientIdx)
+      : [];
+
+    const lowerSpread = lowerSlice.length >= 2
+      ? lowerSlice[lowerSlice.length - 1] - lowerSlice[0]
+      : -Infinity;
+    const upperSpread = upperSlice.length >= 2
+      ? upperSlice[upperSlice.length - 1] - upperSlice[0]
+      : -Infinity;
+
+    if (lowerSpread >= upperSpread && lowerSlice.length >= 2) return lowerSlice;
+    if (upperSlice.length >= 2) return upperSlice;
+
+    return normalSlice; // Fallback: single-element, FD path will be skipped
+  })();
 
   const hasSensorGradient = sensorGradientF != null && sensorGradientF.length >= 2;
+  const isDegenerateGradient =
+    selection.virtualCoreIndexAtPull != null &&
+    selection.virtualSurfaceIndexAtPull != null &&
+    selection.virtualCoreIndexAtPull === selection.virtualSurfaceIndexAtPull;
 
   // ── Live probe state during rest ────────────────────────────────────
   const isConnected = thermo.state === THERMOMETER_STATE.CONNECTED;
@@ -355,8 +396,9 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
         {hasMeasuredData && selection.sensorReadingsAtPull && (
           <div className="physics-sensor-snapshot">
             <div className="physics-sensor-label">
-              Probe at pull — core: T{(selection.virtualCoreIndexAtPull ?? 0) + 1},
-              surface: T{(selection.virtualSurfaceIndexAtPull ?? selection.sensorReadingsAtPull.length - 1) + 1}
+              {isDegenerateGradient && hasSensorGradient
+                ? `Probe at pull — core: T${(selection.virtualCoreIndexAtPull ?? 0) + 1} (full-span gradient used — core = surface sensor)`
+                : `Probe at pull — core: T${(selection.virtualCoreIndexAtPull ?? 0) + 1}, surface: T${(selection.virtualSurfaceIndexAtPull ?? selection.sensorReadingsAtPull.length - 1) + 1}`}
             </div>
             <div className="physics-sensor-row">
               {selection.sensorReadingsAtPull.map((temp, i) => {
@@ -409,7 +451,9 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <PhysicsParam
             label="Surface Gradient"
             symbol={hasSensorGradient
-              ? `🔬 T_core → T_surface (${sensorGradientF.length} sensors)`
+              ? isDegenerateGradient
+                ? `🔬 T_core → T_hottest (${sensorGradientF.length} sensors, full-span)`
+                : `🔬 T_core → T_surface (${sensorGradientF.length} sensors)`
               : hasMeasuredData
                 ? '🌡 T_surface − T_core (probe)'
                 : 'ΔT surface→core (model)'}
