@@ -1,6 +1,10 @@
+import { useState, useEffect } from 'react';
 import { CATEGORIES } from '../data/temperatures';
+import { loadLog } from '../utils/cookLog';
 
 export default function CategoryScreen({ navigate, SCREENS }) {
+  const [logCount, setLogCount] = useState(0);
+  useEffect(() => { setLogCount(loadLog().length); }, []);
   return (
     <div className="screen category-screen">
       {/* Full-screen ambient background */}
@@ -34,6 +38,16 @@ export default function CategoryScreen({ navigate, SCREENS }) {
             </button>
           );
         })}
+      </div>
+
+      {/* Cook History link */}
+      <div style={{ position: 'relative', zIndex: 1, padding: '0 20px 8px', textAlign: 'center' }}>
+        <button
+          className="log-history-btn"
+          onClick={() => navigate(SCREENS.LOG)}
+        >
+          📋 Cook History{logCount > 0 ? ` (${logCount})` : ''}
+        </button>
       </div>
 
       <div style={{ height: 40 }} />

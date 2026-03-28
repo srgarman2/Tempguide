@@ -5,6 +5,7 @@ import DonenessScreen from './components/DonenessScreen';
 import CookingMethodScreen from './components/CookingMethodScreen';
 import CookScreen from './components/CookScreen';
 import RestScreen from './components/RestScreen';
+import LogScreen from './components/LogScreen';
 import useThermometer from './hooks/useThermometer';
 
 const SCREENS = {
@@ -14,6 +15,7 @@ const SCREENS = {
   METHOD:   'method',
   COOK:     'cook',
   REST:     'rest',
+  LOG:      'log',
 };
 
 const DEFAULT_SELECTION = {
@@ -103,6 +105,9 @@ export default function App() {
         )}
         {screen === SCREENS.REST && (
           <RestScreen {...screenProps} />
+        )}
+        {screen === SCREENS.LOG && (
+          <LogScreen goBack={goBack} />
         )}
       </div>
     </div>

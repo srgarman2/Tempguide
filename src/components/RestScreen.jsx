@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover } from '../utils/carryover';
 import { THERMOMETER_STATE } from '../constants/thermometer';
 import useRestTimer from '../hooks/useRestTimer';
 import NavBar from './NavBar';
 import CarryoverChart from './CarryoverChart';
+import { buildLogEntry, saveLogEntry } from '../utils/cookLog';
 
 export default function RestScreen({ selection, thermo, navigate, goBack, startOver, SCREENS }) {
   const category = getCategoryById(selection.categoryId);
@@ -130,6 +131,25 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   });
 
   const { carryover } = timer;
+
+  // ── Auto-save log entry when rest completes ──────────────────────────
+  const logSavedRef = useRef(false);
+  useEffect(() => {
+    if (!timer.isComplete || logSavedRef.current) return;
+    logSavedRef.current = true;
+    const entry = buildLogEntry({
+      selection,
+      item,
+      category,
+      method,
+      doneness,
+      initialCarryover: timer.initialCarryover,
+      liveHistory:      timer.liveHistory,
+      sensorGradientF,
+      isDegenerateGradient,
+    });
+    saveLogEntry(entry);
+  }, [timer.isComplete]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const endTempDisplay = doneness
     ? (doneness.endTemp != null && typeof doneness.endTemp === 'object'
