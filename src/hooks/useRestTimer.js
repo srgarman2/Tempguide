@@ -336,7 +336,9 @@ export default function useRestTimer({
         if (i > 0) {
           const prev = profile[i - 1];
           const curr = profile[i];
-          const fraction = (endTempF - prev.tempF) / (curr.tempF - prev.tempF);
+          const spread = curr.tempF - prev.tempF;
+          if (spread === 0) return prev.minute; // flat section — target lands right at this point
+          const fraction = (endTempF - prev.tempF) / spread;
           return Math.round((prev.minute + fraction * (curr.minute - prev.minute)) * 10) / 10;
         }
         return profile[i].minute;

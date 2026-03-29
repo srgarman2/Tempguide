@@ -665,8 +665,9 @@ export function estimateCarryover({
   // Empirically ~35–50% of the "Fourier time constant" (Lc²/α).
   // Large cuts take longer to peak; thin cuts peak quickly.
   const timeConstantSec = (Lc * Lc) / alpha;
-  // Cap at 120 min — large roasts (3"+) genuinely need 60-90 min to peak.
-  const minutesToPeak = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
+  // Cap at 180 min — very large roasts (4-5"+) can take 90-140 min to peak;
+  // the old 120-min cap under-predicted peak time for cuts over ~3.5 inches.
+  const minutesToPeak = Math.max(3, Math.min(180, (timeConstantSec / 60) * 0.45));
 
   // Evaluate Fourier number at the moment of peak carryover — the physically
   // meaningful instant, not the arbitrary end of rest.

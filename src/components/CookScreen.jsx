@@ -141,13 +141,19 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
 
     // Full sensor gradient: slice from virtual core to virtual surface (inclusive).
     // Only available in Normal mode with full 8-sensor data.
-    const liveGradient = (
+    // Guard: core must be strictly inside surface for a valid hot-core gradient.
+    // If the probe returns them equal or swapped, slice() would produce a
+    // single-element or reversed array — skip the FD path in that case.
+    const gradientValid = (
       isConnected &&
       !thermo.isInstantRead &&
       thermo.sensors != null &&
       thermo.sensors.length >= 2 &&
-      thermo.virtualSurfaceIndex != null
-    ) ? thermo.sensors.slice(thermo.virtualCoreIndex, thermo.virtualSurfaceIndex + 1)
+      thermo.virtualSurfaceIndex != null &&
+      thermo.virtualCoreIndex < thermo.virtualSurfaceIndex
+    );
+    const liveGradient = gradientValid
+      ? thermo.sensors.slice(thermo.virtualCoreIndex, thermo.virtualSurfaceIndex + 1)
       : null;
 
     // surfaceTemp is null in Instant Read mode (hook handles this); used as fallback
