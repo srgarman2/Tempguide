@@ -308,6 +308,28 @@ const METHOD_PF_OVERRIDE = {
 };
 
 /**
+ * Method-aware bone-in correction factors.
+ *
+ * The default 0.85 assumes bone insulates one face, reducing inward heat flow.
+ * This is correct for methods where heat comes primarily from one direction
+ * (pan-sear, grill). But for basting-flip, the hot butter coats ALL exposed
+ * surfaces — compensating for the bone's insulating effect. The bone still
+ * insulates one face but the butter reservoir delivers heat everywhere else,
+ * so the net reduction is much smaller.
+ *
+ * For methods with high volumetric/uniform heating (reverse-sear oven phase,
+ * jeff-special), the bone stores significant heat and acts as an internal
+ * thermal reservoir during rest — less correction needed.
+ */
+const BONE_IN_FACTOR = {
+  'basting-flip':   0.93,  // Butter compensates for bone insulation
+  'jeff-special':   0.90,  // Volumetric heating — bone stores heat
+  'reverse-sear':   0.90,  // Long oven phase heats bone through
+  'sous-vide':      0.95,  // Bath fully equilibrates bone
+};
+const BONE_IN_DEFAULT = 0.85;  // Standard: bone insulates one face → ~15% reduction
+
+/**
  * Methods where thickness scaling of the surface gradient should be suppressed.
  *
  * Thickness scaling (√thicknessInches) models the deeper gradient that builds in
@@ -435,6 +457,9 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
     'grill-high':     45,   // High heat grill — steeper gradient than oven
     'pan-sear':       40,   // Hot pan: effective sub-surface gradient ~40°F above center
     'jeff-special':   15,   // Volumetric heating + trapped steam caps the surface gradient
+    'frequent-flip':  25,   // Flipping every 30–60s prevents extreme surface buildup.
+                            // Gradient is more even than single-flip pan-sear (~40°F) but
+                            // still hotter than oven methods. ~60% of pan-sear excess.
     'basting-flip':   65,   // Continuous hot-butter basting (~320–350°F) persists AFTER pull;
                             // residual surface heat drives 15–20°F rise in typical steaks.
                             // Chris Young empirical: "around 20°F" for basted steaks.
@@ -566,6 +591,7 @@ export function estimateCarryover({
       isWrapped,
       simMinutes:     Math.max(restMinutes + 30, 45),
       geometry,
+      boneIn,
     });
 
     // Compute fractionReached using Bi→∞ eigenvalues (see CARRYOVER_EIGENVALUES).
@@ -575,7 +601,8 @@ export function estimateCarryover({
     const Bi_fd = (h_fd * Lc) / K_MEAT;
     const { lambda1: lam1_fd, A1: A1_fd } = biotLookup(Bi_fd, geometry);
     const timeConstantSec     = (Lc * Lc) / alpha;
-    const minutesToPeakEmpir  = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
+    const fdPeakFraction      = methodId === 'basting-flip' ? 0.52 : 0.45;
+    const minutesToPeakEmpir  = Math.max(3, Math.min(120, (timeConstantSec / 60) * fdPeakFraction));
     const Fo_empir            = (alpha * minutesToPeakEmpir * 60) / (Lc * Lc);
     const carryEigen_fd       = CARRYOVER_EIGENVALUES[geometry] ?? CARRYOVER_EIGENVALUES.slab;
     const thetaStar_fd        = carryEigen_fd.A1 * Math.exp(-carryEigen_fd.lambda1 * carryEigen_fd.lambda1 * Fo_empir);
@@ -599,8 +626,8 @@ export function estimateCarryover({
     }
     // Apply geometry correction
     pf *= (GEOMETRY_TYPES[geometry]?.factor ?? 1.0);
-    // Bone-in correction (same as empirical path)
-    if (boneIn) pf *= 0.85;
+    // Bone-in correction — method-aware (basting compensates for bone insulation)
+    if (boneIn) pf *= (BONE_IN_FACTOR[methodId] ?? BONE_IN_DEFAULT);
 
     // FD effective fraction: how much of the surface gradient the 1D simulation
     // predicts conducts inward. Over-predicts vs 3D reality.
@@ -610,7 +637,9 @@ export function estimateCarryover({
     // Correction factor: scale so calibrated FD matches empirical prediction.
     // correction = (fractionReachedEmpir × pf) / fdEffectiveFraction
     // For mammalian 1" pan-sear: correction ≈ (0.67 × 0.28) / 0.36 ≈ 0.52
-    const correction = Math.min(1.5, Math.max(0.1,
+    // Upper clamp at 2.0 (was 1.5) — bone-in basting with high PF can push
+    // the ratio higher legitimately; 1.5 was clipping valid corrections.
+    const correction = Math.min(2.0, Math.max(0.1,
       (fractionReachedEmpir * pf) / fdEffectiveFraction
     ));
 
@@ -664,9 +693,14 @@ export function estimateCarryover({
   // ── Time to peak carryover ──────────────────────────────────────────────
   // Empirically ~35–50% of the "Fourier time constant" (Lc²/α).
   // Large cuts take longer to peak; thin cuts peak quickly.
+  //
+  // Basting methods: the residual butter film maintains elevated surface temp
+  // for 1–2 min after pull, extending the period of inward heat flow. Use a
+  // slightly higher fraction (0.52) to capture the delayed peak.
   const timeConstantSec = (Lc * Lc) / alpha;
+  const peakFraction = methodId === 'basting-flip' ? 0.52 : 0.45;
   // Cap at 120 min — large roasts (3"+) genuinely need 60-90 min to peak.
-  const minutesToPeak = Math.max(3, Math.min(120, (timeConstantSec / 60) * 0.45));
+  const minutesToPeak = Math.max(3, Math.min(120, (timeConstantSec / 60) * peakFraction));
 
   // Evaluate Fourier number at the moment of peak carryover — the physically
   // meaningful instant, not the arbitrary end of rest.
@@ -731,9 +765,9 @@ export function estimateCarryover({
   const geoFactor = GEOMETRY_TYPES[geometry]?.factor ?? 1.0;
   penetrationFactor *= geoFactor;
 
-  // Bone-in correction: bone insulates one face → ~15% less effective penetration
+  // Bone-in correction — method-aware (basting/volumetric methods compensate for bone)
   if (boneIn) {
-    penetrationFactor *= 0.85;
+    penetrationFactor *= (BONE_IN_FACTOR[methodId] ?? BONE_IN_DEFAULT);
   }
 
   const rawCarryover = surfaceGradient * fractionReached * penetrationFactor;

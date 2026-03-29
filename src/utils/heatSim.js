@@ -155,6 +155,7 @@ export function simulateCarryover({
   isWrapped      = false,
   simMinutes     = 60,
   geometry       = 'slab',
+  boneIn         = false,
 }) {
   if (!sensorTempsF || sensorTempsF.length < 2) {
     throw new Error('[heatSim] sensorTempsF must have at least 2 readings');
@@ -178,6 +179,19 @@ export function simulateCarryover({
   const r       = ALPHA * dt / (dx * dx);                // Fourier mesh number ≈ 0.4
   const BiNode  = h * dx / K_MEAT;                      // node-level Biot number
 
+  // ── Bone-in BC setup ─────────────────────────────────────────────────────
+  // Bone has ~⅓ the thermal conductivity of muscle (~0.16 vs 0.49 W/m·K).
+  // For the center (bone-side) node, we model this as a reduced-conductivity
+  // interface: instead of perfect symmetry (ghost T[-1] = T[1]), use:
+  //   Tnew[0] = T[0] + 2·r·boneFactor·(T[1] - T[0])
+  // where boneFactor < 1 represents the bone's lower conductivity retarding
+  // heat flow from the sear side through the center.
+  //
+  // k_bone ≈ 0.16 W/m·K; k_muscle ≈ 0.49 W/m·K
+  // Interface conductivity ≈ harmonic mean ratio: 2·k_b·k_m / (k_b + k_m) / k_m ≈ 0.49
+  // In practice, the bone is a partial barrier — use 0.50 as the reduction factor.
+  const boneConductionFactor = boneIn ? 0.50 : 1.0;
+
   // ── Initial condition ─────────────────────────────────────────────────────
   let T    = interpolateToNodes(sensorTempsF, N_NODES);
   let Tnew = new Float64Array(N_NODES + 1);
@@ -193,8 +207,10 @@ export function simulateCarryover({
   let minutesToPeak = 0;
 
   for (let step = 1; step <= totalSteps; step++) {
-    // Center node — symmetry BC: ghost node T[-1] = T[1]
-    Tnew[0] = T[0] + 2 * r * (T[1] - T[0]);
+    // Center node — symmetry BC (modified for bone-in: reduced conductivity)
+    // Standard: ghost node T[-1] = T[1] → Tnew[0] = T[0] + 2r·(T[1] - T[0])
+    // Bone-in: bone retards heat flow at center → effective r reduced by boneFactor
+    Tnew[0] = T[0] + 2 * r * boneConductionFactor * (T[1] - T[0]);
 
     // Interior nodes — standard 3-point stencil
     for (let i = 1; i < N_NODES; i++) {

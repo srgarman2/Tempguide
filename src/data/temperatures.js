@@ -369,7 +369,7 @@ export const CATEGORIES = [
         label: 'Pork Chop / Loin',
         description: 'Chops, tenderloin, loin roasts',
         hasDoneness: true,
-        compatibleMethods: ['pan-sear', 'sear-and-bake', 'grill-high', 'grill-medium', 'reverse-sear', 'oven-moderate', 'sous-vide', 'jeff-special'],
+        compatibleMethods: ['pan-sear', 'frequent-flip', 'basting-flip', 'sear-and-bake', 'grill-high', 'grill-medium', 'reverse-sear', 'oven-moderate', 'sous-vide', 'jeff-special'],
         doneness: [
           {
             level: 'Juicy (Kenji)',
