@@ -3,6 +3,16 @@ import { getCategoryById, getItemById, COOKING_METHODS } from '../data/temperatu
 import { estimateCarryover, GEOMETRY_TYPES } from '../utils/carryover';
 import NavBar from './NavBar';
 
+/** Format a thickness in decimal inches to a readable fraction string.
+ *  0.25 → ¼"   0.5 → ½"   0.75 → ¾"   1.25 → 1¼"   1.5 → 1½"  etc. */
+const QUARTER_FRACTIONS = { 0: '', 0.25: '¼', 0.5: '½', 0.75: '¾' };
+function formatThickness(inches) {
+  const whole = Math.floor(inches);
+  const frac  = Math.round((inches - whole) * 4) / 4; // snap to nearest 0.25
+  const fracStr = QUARTER_FRACTIONS[frac] ?? '';
+  return whole === 0 ? `${fracStr}"` : fracStr ? `${whole}${fracStr}"` : `${whole}"`;
+}
+
 // Default slider label positions (0.5–3.0) — used when item has no custom range
 const DEFAULT_SLIDER_LABELS = [
   { label: '½"', value: 0.5 },
@@ -68,7 +78,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
         <div className="thickness-section">
           <h4>{item.thicknessLabel ?? 'Thickness'}</h4>
           <div className="thickness-slider">
-            <div className="thickness-value">{thickness.toFixed(1)}"</div>
+            <div className="thickness-value">{formatThickness(thickness)}</div>
             <input
               type="range"
               min={sliderMin}
