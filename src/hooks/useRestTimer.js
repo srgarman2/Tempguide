@@ -73,9 +73,13 @@ export default function useRestTimer({
   const [assimilationCount, setAssimilationCount]       = useState(0);
   const [liveHistory, setLiveHistory]                   = useState([]);   // [{minute, tempF}]
 
-  const intervalRef    = useRef(null);
-  const onCompleteRef  = useRef(onComplete);
-  onCompleteRef.current = onComplete;
+  const intervalRef        = useRef(null);
+  const onCompleteRef      = useRef(onComplete);
+  onCompleteRef.current    = onComplete;
+  // Wall-clock anchor: Date.now() value such that (Date.now() - startTimestampRef) = elapsed ms.
+  // Set on start/resume, cleared on pause/reset.  The interval reads the clock instead of
+  // counting ticks, so the timer is immune to browser throttling when the screen is off.
+  const startTimestampRef  = useRef(null);
 
   // Refs for values that change at 10 Hz — avoids re-renders per BLE notification
   const liveSensorsRef    = useRef(liveSensors);
@@ -144,6 +148,7 @@ export default function useRestTimer({
 
   // ── Timer controls ──────────────────────────────────────────────────
   const start = useCallback(() => {
+    startTimestampRef.current = Date.now();  // anchor wall clock at elapsed = 0
     setIsRunning(true);
     setElapsedSec(0);
     setIsComplete(false);
@@ -152,10 +157,19 @@ export default function useRestTimer({
     setLiveHistory([]);
   }, []);
 
-  const pause  = useCallback(() => setIsRunning(false), []);
-  const resume = useCallback(() => setIsRunning(true), []);
+  const pause = useCallback(() => {
+    startTimestampRef.current = null;        // freeze the anchor; elapsedSec holds current position
+    setIsRunning(false);
+  }, []);
+
+  const resume = useCallback(() => {
+    // Re-anchor so that (Date.now() - anchor) gives the already-elapsed seconds from here.
+    startTimestampRef.current = Date.now() - elapsedSecRef.current * 1000;
+    setIsRunning(true);
+  }, []);
 
   const reset = useCallback(() => {
+    startTimestampRef.current = null;
     setIsRunning(false);
     setElapsedSec(0);
     setIsComplete(false);
@@ -165,27 +179,56 @@ export default function useRestTimer({
   }, []);
 
   // ── Main timer tick (1 Hz) ──────────────────────────────────────────
+  // Reads wall-clock elapsed time instead of counting ticks, so the timer
+  // is not affected by browser interval throttling (screen-off, background tab).
   useEffect(() => {
     if (!isRunning) {
       clearInterval(intervalRef.current);
       return;
     }
 
-    intervalRef.current = setInterval(() => {
-      setElapsedSec(prev => {
-        const next = prev + 1;
-        if (next >= totalSec) {
-          setIsRunning(false);
-          setIsComplete(true);
-          clearInterval(intervalRef.current);
-          onCompleteRef.current?.();
-          return totalSec;
-        }
-        return next;
-      });
-    }, 1000);
+    const applyElapsed = () => {
+      if (startTimestampRef.current == null) return;
+      const wallElapsed = Math.floor((Date.now() - startTimestampRef.current) / 1000);
+      const next = Math.min(wallElapsed, totalSec);
+      setElapsedSec(next);
+      if (wallElapsed >= totalSec) {
+        setIsRunning(false);
+        setIsComplete(true);
+        clearInterval(intervalRef.current);
+        onCompleteRef.current?.();
+      }
+    };
+
+    // Apply immediately in case we're resuming after a long background period
+    applyElapsed();
+    intervalRef.current = setInterval(applyElapsed, 1000);
 
     return () => clearInterval(intervalRef.current);
+  }, [isRunning, totalSec]);
+
+  // ── Visibility sync ────────────────────────────────────────────────
+  // When the screen turns back on the interval may not have fired for minutes.
+  // visibilitychange fires immediately when the page becomes visible, letting
+  // us sync to wall-clock time in one event rather than waiting for the next tick.
+  useEffect(() => {
+    if (!isRunning) return;
+
+    const handleVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (startTimestampRef.current == null) return;
+      const wallElapsed = Math.floor((Date.now() - startTimestampRef.current) / 1000);
+      const next = Math.min(wallElapsed, totalSec);
+      setElapsedSec(next);
+      if (wallElapsed >= totalSec) {
+        setIsRunning(false);
+        setIsComplete(true);
+        onCompleteRef.current?.();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisible);
+    return () => document.removeEventListener('visibilitychange', handleVisible);
   }, [isRunning, totalSec]);
 
   // ── Live history recording (every HISTORY_SAMPLE_SEC) ───────────────
