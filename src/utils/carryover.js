@@ -280,23 +280,31 @@ function biotLookup(Bi, geometry) {
  * Most methods use the category-based default (mammalian 0.28, seafood 0.80, etc.)
  * but some methods fundamentally change the surface boundary condition during rest:
  *
+ *   frequent-flip: Flipping every 30–60 sec prevents either face from building an
+ *     extreme surface temperature. The gradient across the cut is more even than a
+ *     single-flip pan sear, so less stored heat reaches the center during rest.
+ *     PF is set ~20% below the mammalian default (0.28 → 0.22) to reflect this
+ *     reduced gradient. No thickness decay — the effect is geometry-independent.
+ *
  *   basting-flip: Hot butter film (~320–350°F) acts as a thermal reservoir that
- *     persists AFTER the steak is pulled. Unlike pan-sear where the surface cools
+ *     persists AFTER the protein is pulled. Unlike pan-sear where the surface cools
  *     to air immediately, basting keeps the surface hot → more heat conducts inward.
  *
- *     The butter film's thermal mass is meaningful for steaks up to ~1": the film
- *     stays hot long enough for heat to reach the center. Beyond 1" the reservoir
+ *     The butter film's thermal mass is meaningful for cuts up to ~1”: the film
+ *     stays hot long enough for heat to reach the center. Beyond 1” the reservoir
  *     cools before the interior equilibrates, so we decay exponentially:
  *       pf_effective = pf × exp(-decay × max(0, thicknessInches - decayOrigin))
  *
- *     Calibrated against Chris Young / ChefSteps empirical data:
+ *     Calibrated against Chris Young / ChefSteps empirical data (beef steaks;
+ *     applies equally to pork chops — same mammalian muscle tissue):
  *       0.5” → ~25°F (clamped), 0.75” → ~20°F, 1.0” → ~20°F,
  *       1.5” → ~16°F, 2.0” → ~13°F, 3.0” → ~8°F
- *     Chris Young reports "around 20°F" carryover for typical basted steaks.
+ *     Chris Young reports “around 20°F” carryover for typical basted steaks.
  */
 const METHOD_PF_OVERRIDE = {
-  'basting-flip': { unwrapped: 0.53, wrapped: 0.70, decayPerInch: 0.45, decayOrigin: 1.0 },
-  'jeff-special': { unwrapped: 0.50, wrapped: 0.50 },
+  'frequent-flip': { unwrapped: 0.22, wrapped: 0.38 },
+  'basting-flip':  { unwrapped: 0.53, wrapped: 0.70, decayPerInch: 0.45, decayOrigin: 1.0 },
+  'jeff-special':  { unwrapped: 0.50, wrapped: 0.50 },
 };
 
 /**
