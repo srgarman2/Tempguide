@@ -64,8 +64,9 @@ const UART_RX_CHAR            = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 const UART_TX_CHAR            = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
 // UART message type IDs (strip high bit 0x80 before comparing)
-const MSG_PROBE_STATUS = 0x45;  // GGG relays probe data: 8-sensor gradient + virtual IDs
-const MSG_GAUGE_STATUS = 0x60;  // GGG's own RTD ambient grill temperature
+const MSG_READ_PROBE_LIST = 0x44; // Request: ask node/display to start relaying probe data
+const MSG_PROBE_STATUS    = 0x45; // Notification: relayed 8-sensor probe gradient + virtual IDs
+const MSG_GAUGE_STATUS    = 0x60; // Notification: GGG's own RTD ambient grill temperature
 
 const NUM_SENSORS = 8;
 
@@ -280,6 +281,57 @@ function parseDeviceStatus(dataView) {
   };
 }
 
+// ── UART request frame builder ───────────────────────────────────────────────
+
+/**
+ * Build a UART request frame for sending to a MeatNet Node or Display.
+ *
+ * Frame layout (15-byte header + optional payload):
+ *   [0-1]  Sync { 0xCA, 0xFE }
+ *   [2-3]  CRC-16-CCITT over bytes[4..end]
+ *   [4]    Message type (no 0x80 bit — requests don't set the response marker)
+ *   [5-8]  Request ID { 1, 0, 0, 0 }
+ *   [9-12] Response ID { 0, 0, 0, 0 }
+ *   [13]   Success: 0
+ *   [14]   Payload length
+ *   [15+]  Payload (if any)
+ *
+ * @param {number} msgType
+ * @param {Uint8Array} [payload]
+ * @returns {Uint8Array}
+ */
+function buildUARTRequest(msgType, payload = new Uint8Array(0)) {
+  const frame = new Uint8Array(15 + payload.length);
+  frame[0] = 0xCA;
+  frame[1] = 0xFE;
+  // [2-3] CRC filled in below
+  frame[4] = msgType;          // no 0x80 — this is a request, not a response/notification
+  frame[5] = 1;                // Request ID = 1 (non-zero so device can match response)
+  // [6-8] Request ID upper bytes = 0
+  // [9-12] Response ID = 0
+  frame[13] = 0;               // success = 0 in requests
+  frame[14] = payload.length;
+  if (payload.length > 0) frame.set(payload, 15);
+
+  const crc = crc16ccitt(frame.slice(4));
+  frame[2] = (crc >> 8) & 0xFF;
+  frame[3] = crc & 0xFF;
+  return frame;
+}
+
+/**
+ * Detect the type of UART-path device from its advertised name.
+ * Returns 'display' for Combustion Display units, 'node' for everything else
+ * (GGG, generic MeatNet nodes, unknown).
+ *
+ * @param {string|null} name
+ * @returns {'display'|'node'}
+ */
+function detectUARTDeviceType(name) {
+  if (name && name.toLowerCase().includes('display')) return 'display';
+  return 'node';
+}
+
 // ── Hook ─────────────────────────────────────────────────────────────────────
 
 export default function useThermometer() {
@@ -465,7 +517,7 @@ export default function useThermometer() {
             rxCharRef.current = null; // non-fatal — notifications still work without RX
           }
           isNodeConnectionRef.current = true;
-          setConnectedVia('node');
+          setConnectedVia(detectUARTDeviceType(device.name));
         } catch {
           throw new Error('Could not find temperature characteristic. Ensure the probe firmware is up to date.');
         }
@@ -474,6 +526,17 @@ export default function useThermometer() {
       charRef.current = char;
       char.addEventListener('characteristicvaluechanged', handleNotification);
       await char.startNotifications();
+
+      // For UART-path devices (Display, Node, GGG): send Read Probe List (0x44) to
+      // prompt the device to start relaying connected probe status notifications.
+      // Without this, some Display/Node firmware won't begin sending 0x45 Probe Status frames.
+      if (isNodeConnectionRef.current && rxCharRef.current) {
+        try {
+          await rxCharRef.current.writeValueWithResponse(buildUARTRequest(MSG_READ_PROBE_LIST));
+        } catch (e) {
+          console.warn('[useThermometer] Read Probe List request failed (non-fatal):', e.message);
+        }
+      }
 
       setState(THERMOMETER_STATE.CONNECTED);
     } catch (err) {

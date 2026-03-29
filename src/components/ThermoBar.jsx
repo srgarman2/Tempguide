@@ -19,6 +19,7 @@ export default function ThermoBar({ thermo, accentColor }) {
   const isConnected   = state === THERMOMETER_STATE.CONNECTED;
   const isUnsupported = state === THERMOMETER_STATE.UNSUPPORTED;
   const isGGG         = isConnected && connectedVia === 'node';
+  const isDisplay     = isConnected && connectedVia === 'display';
 
   const handleClick = () => {
     if (isConnected) {
@@ -49,7 +50,8 @@ export default function ThermoBar({ thermo, accentColor }) {
         {isConnected && deviceName
           ? deviceName
           : STATE_LABEL[state] ?? 'Thermometer'}
-        {isGGG && <span className="thermo-via-label"> · via GGG</span>}
+        {isGGG     && <span className="thermo-via-label"> · via GGG</span>}
+        {isDisplay && <span className="thermo-via-label"> · via Display</span>}
         {!batteryOk && isConnected && ' · low battery'}
       </span>
 
