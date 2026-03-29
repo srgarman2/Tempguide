@@ -370,7 +370,15 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <span className="val">{endTempDisplay}</span>
         </div>
         <div className="carryover-row">
-          <span className="label">Est. peak (+{carryover.deltaF}°F)</span>
+          <span className="label">Original est. at pull (+{timer.initialCarryover.deltaF}°F)</span>
+          <span className="val" style={{ color: 'var(--text-secondary)' }}>
+            {timer.initialCarryover.peakTempF.toFixed(1)}°F
+          </span>
+        </div>
+        <div className="carryover-row">
+          <span className="label">
+            {timer.isAssimilating ? 'Live-updated est.' : 'Est. peak'} (+{carryover.deltaF}°F)
+          </span>
           <span className="val" style={{ color: '#f5a623' }}>{carryover.peakTempF.toFixed(1)}°F</span>
         </div>
         <div className="carryover-row">

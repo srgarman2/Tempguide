@@ -51,9 +51,9 @@ function LogEntry({ entry, onDelete }) {
         </div>
         <div className="log-entry-right">
           <div className="log-entry-temps">
-            <span className="log-temp-pred">~{entry.predictedPeakF?.toFixed(1)}°</span>
+            <span className="log-temp-pred" title="Original estimate at pull">est {entry.predictedPeakF?.toFixed(1)}°</span>
             {entry.actualPeakF != null && (
-              <span className="log-temp-actual">{entry.actualPeakF?.toFixed(1)}°</span>
+              <span className="log-temp-actual" title="Actual measured peak">{entry.actualPeakF?.toFixed(1)}°</span>
             )}
           </div>
           <ErrorBadge errorF={entry.errorF} />
@@ -105,8 +105,8 @@ function LogEntry({ entry, onDelete }) {
 
           <div className="log-detail-section">
             <div className="log-detail-section-title">Prediction</div>
-            <DetailRow label="Predicted ΔF"       value={entry.predictedDeltaF != null ? `+${entry.predictedDeltaF.toFixed(1)}°F` : null} highlight />
-            <DetailRow label="Predicted peak"     value={entry.predictedPeakF != null ? `${entry.predictedPeakF.toFixed(1)}°F` : null} highlight />
+            <DetailRow label="Original est. ΔF (at pull)"   value={entry.predictedDeltaF != null ? `+${entry.predictedDeltaF.toFixed(1)}°F` : null} highlight />
+            <DetailRow label="Original est. peak (at pull)" value={entry.predictedPeakF != null ? `${entry.predictedPeakF.toFixed(1)}°F` : null} highlight />
             <DetailRow label="Min to peak"        value={entry.predictedMinutesToPeak != null ? `~${entry.predictedMinutesToPeak} min` : null} />
             <DetailRow label="Surface gradient"   value={entry.surfaceGradientF != null ? `${entry.surfaceGradientF.toFixed(1)}°F` : null} />
             <DetailRow label="Gradient source"    value={entry.surfaceDataSource} />
