@@ -73,6 +73,7 @@ export function buildLogEntry({
   liveHistory,
   sensorGradientF,
   isDegenerateGradient,
+  cookPhaseHistory,
 }) {
   // ── Actual outcome from live probe history ──────────────────────────
   let actualPeakF       = null;
@@ -131,7 +132,12 @@ export function buildLogEntry({
     fractionReached:        initialCarryover?.fractionReached    ?? null,
     fourier:                initialCarryover?.fourier            ?? null,
     biot:                   initialCarryover?.biot               ?? null,
+    lambda1:                initialCarryover?.lambda1            ?? null,
+    A1:                     initialCarryover?.A1                 ?? null,
     thermalDiffusivity:     initialCarryover?.thermalDiffusivity ?? null,
+    halfThicknessM:         initialCarryover?.halfThicknessM     ?? null,
+    geometryFactor:         initialCarryover?.geometryFactor     ?? null,
+    convectiveH:            initialCarryover?.convectiveH        ?? null,
     surfaceTempAtPull:      initialCarryover?.surfaceTempAtPull  ?? null,
     effectiveAmbientF:      initialCarryover?.effectiveAmbientF  ?? null,
 
@@ -140,6 +146,9 @@ export function buildLogEntry({
     actualMinutesToPeak,
     hasLiveData: liveHistory != null && liveHistory.length > 0,
     liveHistoryPoints: liveHistory?.length ?? 0,
+
+    // ── Cook phase history ──────────────────────────────────────────
+    cookPhaseHistory: cookPhaseHistory ?? null,
 
     // ── Error ───────────────────────────────────────────────────────
     errorF,

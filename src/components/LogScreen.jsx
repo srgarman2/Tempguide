@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { loadLog, deleteLogEntry, clearLog, exportCSV } from '../utils/cookLog';
 import NavBar from './NavBar';
+import ClaudeAnalysisModal from './ClaudeAnalysisModal';
 
 function ErrorBadge({ errorF }) {
   if (errorF == null) return <span className="log-badge log-badge--neutral">No data</span>;
@@ -26,7 +27,7 @@ function DetailRow({ label, value, highlight }) {
   );
 }
 
-function LogEntry({ entry, onDelete }) {
+function LogEntry({ entry, onDelete, onAnalyze }) {
   const [expanded, setExpanded] = useState(false);
 
   const date = new Date(entry.timestamp);
@@ -135,12 +136,20 @@ function LogEntry({ entry, onDelete }) {
             )}
           </div>
 
-          <button
-            className="log-delete-btn"
-            onClick={() => { if (window.confirm('Delete this entry?')) onDelete(entry.id); }}
-          >
-            Delete entry
-          </button>
+          <div className="log-entry-footer">
+            <button
+              className="log-analyze-btn"
+              onClick={() => onAnalyze(entry)}
+            >
+              Analyze with Claude
+            </button>
+            <button
+              className="log-delete-btn"
+              onClick={() => { if (window.confirm('Delete this entry?')) onDelete(entry.id); }}
+            >
+              Delete
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -148,7 +157,8 @@ function LogEntry({ entry, onDelete }) {
 }
 
 export default function LogScreen({ goBack }) {
-  const [log, setLog] = useState([]);
+  const [log, setLog]                   = useState([]);
+  const [analyzingEntry, setAnalyzing]  = useState(null);
 
   useEffect(() => {
     setLog(loadLog());
@@ -236,12 +246,19 @@ export default function LogScreen({ goBack }) {
           </div>
         ) : (
           log.map(entry => (
-            <LogEntry key={entry.id} entry={entry} onDelete={handleDelete} />
+            <LogEntry key={entry.id} entry={entry} onDelete={handleDelete} onAnalyze={setAnalyzing} />
           ))
         )}
       </div>
 
       <div style={{ height: 40 }} />
+
+      {analyzingEntry && (
+        <ClaudeAnalysisModal
+          entry={analyzingEntry}
+          onClose={() => setAnalyzing(null)}
+        />
+      )}
     </div>
   );
 }

@@ -147,6 +147,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
       liveHistory:      timer.liveHistory,
       sensorGradientF,
       isDegenerateGradient,
+      cookPhaseHistory: selection.cookPhaseHistory ?? null,
     });
     saveLogEntry(entry);
   }, [timer.isComplete]); // eslint-disable-line react-hooks/exhaustive-deps

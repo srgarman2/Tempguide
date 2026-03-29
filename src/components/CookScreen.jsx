@@ -209,6 +209,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
       sensorReadingsAtPull:      hasFullSensors ? [...thermo.sensors] : null,
       virtualCoreIndexAtPull:    hasFullSensors ? thermo.virtualCoreIndex    : null,
       virtualSurfaceIndexAtPull: hasFullSensors ? thermo.virtualSurfaceIndex : null,
+      cookPhaseHistory: cookHistory.history.length > 0 ? cookHistory.history : null,
     });
   };
 
