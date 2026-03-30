@@ -80,7 +80,17 @@ function LogEntry({ entry, onDelete }) {
             <div className="log-detail-section-title">At Pull</div>
             <DetailRow label="Core"    value={entry.pullCoreTempF != null ? `${entry.pullCoreTempF.toFixed(1)}°F` : null} highlight />
             <DetailRow label="Surface" value={entry.pullSurfaceTempF != null ? `${entry.pullSurfaceTempF.toFixed(1)}°F` : null} />
-            <DetailRow label="Ambient" value={entry.pullAmbientTempF != null ? `${entry.pullAmbientTempF.toFixed(1)}°F (probe)` : '72°F (assumed)'} />
+            <DetailRow
+              label="Ambient (probe)"
+              value={entry.pullAmbientTempF != null ? `${entry.pullAmbientTempF.toFixed(1)}°F${entry.ambientWasClamped ? ' ⚠ cooking env' : ''}` : '—'}
+            />
+            <DetailRow
+              label="Rest ambient used"
+              value={entry.restAmbientF != null
+                ? `${entry.restAmbientF.toFixed(1)}°F${entry.ambientWasClamped ? ' (clamped from cooking env)' : ''}`
+                : '72°F (assumed)'}
+              highlight={entry.ambientWasClamped}
+            />
             {entry.sensorReadingsAtPull && (
               <div className="log-sensor-row">
                 {entry.sensorReadingsAtPull.map((t, i) => (

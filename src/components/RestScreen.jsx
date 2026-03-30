@@ -106,6 +106,20 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   const hasLiveGradient = isConnected && !thermo.isInstantRead
     && thermo.sensors?.length >= 2 && thermo.virtualSurfaceIndex != null;
 
+  // The probe's T8 ambient sensor reads the COOKING environment at pull time
+  // (grill at 220-300°F, near hot pan at 180-220°F) — not the kitchen counter
+  // where the meat actually rests. Feeding a 245°F "ambient" into the FD
+  // simulation causes it to think the surface is gaining heat from the
+  // environment during rest, producing absurdly large FD ΔF and a correction
+  // factor clamped to 0.1 → catastrophic under-prediction.
+  //
+  // Cap at 95°F: any probe ambient above that was reading cooking environment,
+  // not resting counter. A kitchen is never 200°F.
+  const REST_AMBIENT_MAX_F = 95;
+  const rawAmbientF = selection.actualAmbientTempF ?? 72;
+  const restAmbientF = Math.min(rawAmbientF, REST_AMBIENT_MAX_F);
+  const ambientWasClamped = rawAmbientF > REST_AMBIENT_MAX_F;
+
   const timer = useRestTimer({
     methodId: selection.methodId,
     pullTempF,
@@ -118,7 +132,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     boneIn: selection.boneIn ?? false,
     actualCoreTempF: selection.actualCoreTempF ?? null,
     actualSurfaceTempF: selection.actualSurfaceTempF ?? null,
-    ambientTempF: selection.actualAmbientTempF ?? 72,
+    ambientTempF: restAmbientF,
     sensorGradientF,
     // ── Live probe data for assimilation ──────────────────────────────
     liveCoreTemp:            isConnected ? thermo.coreTemp : null,
@@ -147,6 +161,8 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
       liveHistory:      timer.liveHistory,
       sensorGradientF,
       isDegenerateGradient,
+      restAmbientF,
+      ambientWasClamped,
     });
     saveLogEntry(entry);
   }, [timer.isComplete]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -343,10 +359,12 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
         </div>
         <div className="carryover-row">
           <span className="label">Ambient {selection.actualAmbientTempF != null ? '🌡' : ''}</span>
-          <span className="val">
-            {selection.actualAmbientTempF != null
-              ? `${selection.actualAmbientTempF.toFixed(1)}°F (probe)`
-              : '72°F (assumed)'}
+          <span className="val" style={ambientWasClamped ? { color: '#f5a623' } : {}}>
+            {ambientWasClamped
+              ? `${restAmbientF}°F (clamped — probe read ${rawAmbientF.toFixed(0)}°F cooking env)`
+              : rawAmbientF != null && rawAmbientF !== 72
+                ? `${rawAmbientF.toFixed(1)}°F (probe)`
+                : '72°F (assumed)'}
           </span>
         </div>
         {timer.isRunning && (

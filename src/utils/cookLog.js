@@ -73,6 +73,8 @@ export function buildLogEntry({
   liveHistory,
   sensorGradientF,
   isDegenerateGradient,
+  restAmbientF,
+  ambientWasClamped,
 }) {
   // ── Actual outcome from live probe history ──────────────────────────
   let actualPeakF       = null;
@@ -112,9 +114,11 @@ export function buildLogEntry({
     isWrapped:       selection.isWrapped ?? false,
 
     // ── Pull-moment sensor data ─────────────────────────────────────
-    pullCoreTempF:    selection.actualCoreTempF    ?? null,
-    pullSurfaceTempF: selection.actualSurfaceTempF ?? null,
-    pullAmbientTempF: selection.actualAmbientTempF ?? null,
+    pullCoreTempF:      selection.actualCoreTempF    ?? null,
+    pullSurfaceTempF:   selection.actualSurfaceTempF ?? null,
+    pullAmbientTempF:   selection.actualAmbientTempF ?? null,  // raw probe T8 (may be cooking env)
+    restAmbientF:       restAmbientF ?? null,                  // actual value used for FD sim (clamped ≤95°F)
+    ambientWasClamped:  ambientWasClamped ?? false,            // true when probe read cooking env
     sensorReadingsAtPull:      selection.sensorReadingsAtPull      ?? null,
     virtualCoreIndexAtPull:    selection.virtualCoreIndexAtPull    ?? null,
     virtualSurfaceIndexAtPull: selection.virtualSurfaceIndexAtPull ?? null,
@@ -160,7 +164,9 @@ const CSV_COLUMNS = [
   ['isWrapped',             'Wrapped'],
   ['pullCoreTempF',         'Pull Core (°F)'],
   ['pullSurfaceTempF',      'Pull Surface (°F)'],
-  ['pullAmbientTempF',      'Pull Ambient (°F)'],
+  ['pullAmbientTempF',      'Pull Ambient Raw (°F)'],
+  ['restAmbientF',          'Rest Ambient Used (°F)'],
+  ['ambientWasClamped',     'Ambient Clamped (cooking env)'],
   ['surfaceGradientF',      'Surface Gradient (°F)'],
   ['surfaceDataSource',     'Gradient Source'],
   ['predictedDeltaF',       'Predicted ΔF'],
