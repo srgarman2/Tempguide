@@ -390,12 +390,21 @@ export default function useThermometer() {
         }
 
         if (frame.msgType === MSG_PROBE_STATUS) {
-          // Probe Status (0x45): payload[0-3] = probe serial, payload[4:] = Device Status layout
-          if (frame.payload.length < 34) return; // need serial(4)+log(8)+temp(13)+mode(1)+battery(1)+prediction(7)
-          // IMPORTANT: use .slice(4) not a shifted DataView — parseDeviceStatus does
+          // Probe Status (0x45): payload[0-9] = probe serial (10 bytes, matching Gauge Status
+          // serial format), payload[10:] = Device Status layout (identical to direct-probe char).
+          //
+          // Minimum: serial(10) + log(8) + temp(13) + mode(1) + battery(1) = 33 bytes.
+          // Prediction bytes (7) may or may not be present in relay — treat as optional.
+          //
+          // IMPORTANT: use .slice(10) not a shifted DataView — parseDeviceStatus does
           // `new Uint8Array(dataView.buffer)` which ignores byteOffset entirely.
           // slice() creates a new ArrayBuffer at byteOffset=0 so indexing is correct.
-          const probeStatusBytes = frame.payload.slice(4);
+          if (frame.payload.length < 33) {
+            console.warn('[useThermometer] Probe Status (0x45) payload too short:',
+              frame.payload.length, '— expected ≥33 bytes (serial(10)+log(8)+temp(13)+mode(1)+battery(1))');
+            return;
+          }
+          const probeStatusBytes = frame.payload.slice(10);
           applyDeviceStatus(parseDeviceStatus(new DataView(probeStatusBytes.buffer)));
 
         } else if (frame.msgType === MSG_GAUGE_STATUS) {
