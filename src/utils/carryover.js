@@ -946,9 +946,13 @@ export function inchesToCm(inches) {
   return Math.round(inches * 2.54 * 10) / 10;
 }
 
-/** Display a thickness value with unit conversion. */
+/** Display a thickness value with unit conversion.
+ *  Rounds to nearest 0.5 cm for clean metric display. */
 export function displayThickness(inches, useCelsius = false) {
-  if (useCelsius) return `${inchesToCm(inches)} cm`;
+  if (useCelsius) {
+    const cm = Math.round(inches * 2.54 * 2) / 2; // nearest 0.5 cm
+    return `${cm} cm`;
+  }
   return `${inches}"`;
 }
 

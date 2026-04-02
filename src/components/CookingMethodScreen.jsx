@@ -13,8 +13,12 @@ function formatThicknessInches(inches) {
   return whole === 0 ? `${fracStr}"` : fracStr ? `${whole}${fracStr}"` : `${whole}"`;
 }
 
+function toCmHalf(inches) {
+  return Math.round(inches * 2.54 * 2) / 2; // nearest 0.5 cm
+}
+
 function formatThicknessDisplay(inches, useCelsius) {
-  if (useCelsius) return `${inchesToCm(inches)} cm`;
+  if (useCelsius) return `${toCmHalf(inches)} cm`;
   return formatThicknessInches(inches);
 }
 
@@ -49,7 +53,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
   const sliderLabelsInches = item.sliderLabels ?? DEFAULT_SLIDER_LABELS;
   const sliderLabels = useCelsius
     ? sliderLabelsInches.map(({ label: _l, value }) => ({
-        label: `${inchesToCm(value)} cm`,
+        label: `${toCmHalf(value)} cm`,
         value,
       }))
     : sliderLabelsInches;
