@@ -13,47 +13,46 @@ export default function CategoryScreen({ navigate, SCREENS, useCelsius, toggleCe
         style={{ background: 'radial-gradient(ellipse at 20% 50%, #1a0808 0%, #0a0404 60%, #050202 100%)' }}
       />
 
-      {/* Unit toggle — top right */}
-      <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
-        <button
-          onClick={toggleCelsius}
-          style={{
-            background: 'rgba(255,255,255,0.08)',
-            border: '1px solid rgba(255,255,255,0.18)',
-            borderRadius: 20,
-            color: 'rgba(240,240,240,0.85)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '5px 12px',
-            fontSize: 13,
-            fontWeight: 600,
-            letterSpacing: '0.02em',
-          }}
-          title={useCelsius ? 'Switch to °F / inches' : 'Switch to °C / cm'}
-        >
-          <span style={{ opacity: useCelsius ? 0.45 : 1 }}>°F</span>
-          <span style={{
-            width: 28, height: 16, borderRadius: 8,
-            background: useCelsius ? 'rgba(76,222,128,0.7)' : 'rgba(255,255,255,0.2)',
-            position: 'relative', display: 'inline-block',
-            transition: 'background 0.2s',
-          }}>
-            <span style={{
-              position: 'absolute', top: 2,
-              left: useCelsius ? 14 : 2,
-              width: 12, height: 12,
-              borderRadius: '50%',
-              background: '#fff',
-              transition: 'left 0.2s',
-            }} />
-          </span>
-          <span style={{ opacity: useCelsius ? 1 : 0.45 }}>°C</span>
-        </button>
-      </div>
-
       <div className="category-hero" style={{ position: 'relative', zIndex: 1 }}>
+        {/* Unit toggle — inline in hero, right-aligned */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+          <button
+            onClick={toggleCelsius}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              borderRadius: 20,
+              color: 'rgba(240,240,240,0.85)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '5px 12px',
+              fontSize: 13,
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+            }}
+            title={useCelsius ? 'Switch to °F / inches' : 'Switch to °C / cm'}
+          >
+            <span style={{ opacity: useCelsius ? 0.45 : 1 }}>°F</span>
+            <span style={{
+              width: 28, height: 16, borderRadius: 8,
+              background: useCelsius ? 'rgba(76,222,128,0.7)' : 'rgba(255,255,255,0.2)',
+              position: 'relative', display: 'inline-block',
+              transition: 'background 0.2s',
+            }}>
+              <span style={{
+                position: 'absolute', top: 2,
+                left: useCelsius ? 14 : 2,
+                width: 12, height: 12,
+                borderRadius: '50%',
+                background: '#fff',
+                transition: 'left 0.2s',
+              }} />
+            </span>
+            <span style={{ opacity: useCelsius ? 1 : 0.45 }}>°C</span>
+          </button>
+        </div>
         <h1>What are<br />you cooking?</h1>
         <p>Precision temperatures, rest times &amp; carryover physics.</p>
       </div>
