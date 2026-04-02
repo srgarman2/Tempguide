@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import CategoryScreen from './components/CategoryScreen';
 import ItemScreen from './components/ItemScreen';
 import DonenessScreen from './components/DonenessScreen';
@@ -35,7 +35,18 @@ export default function App() {
   const [exiting, setExiting]       = useState(false);
   const [selection, setSelection]   = useState(DEFAULT_SELECTION);
   const [history, setHistory]       = useState([]);
+  const [useCelsius, setUseCelsius] = useState(() => {
+    try { return localStorage.getItem('tempguide_celsius') === 'true'; } catch { return false; }
+  });
   const thermo = useThermometer();
+
+  const toggleCelsius = useCallback(() => {
+    setUseCelsius(prev => {
+      const next = !prev;
+      try { localStorage.setItem('tempguide_celsius', String(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   // Navigate forward
   const navigate = (nextScreen, updates = {}) => {
@@ -81,6 +92,8 @@ export default function App() {
     goBack,
     startOver,
     SCREENS,
+    useCelsius,
+    toggleCelsius,
   };
 
   const screenClass = `screen ${exiting ? 'screen-exit' : 'screen-enter'}`;
@@ -107,7 +120,7 @@ export default function App() {
           <RestScreen {...screenProps} />
         )}
         {screen === SCREENS.LOG && (
-          <LogScreen goBack={goBack} />
+          <LogScreen goBack={goBack} useCelsius={useCelsius} />
         )}
       </div>
     </div>

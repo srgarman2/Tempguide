@@ -1,16 +1,21 @@
 import { useState } from 'react';
 import { getCategoryById, getItemById, COOKING_METHODS } from '../data/temperatures';
-import { estimateCarryover, GEOMETRY_TYPES } from '../utils/carryover';
+import { estimateCarryover, GEOMETRY_TYPES, inchesToCm, displayDeltaF } from '../utils/carryover';
 import NavBar from './NavBar';
 
 /** Format a thickness in decimal inches to a readable fraction string.
  *  0.25 → ¼"   0.5 → ½"   0.75 → ¾"   1.25 → 1¼"   1.5 → 1½"  etc. */
 const QUARTER_FRACTIONS = { 0: '', 0.25: '¼', 0.5: '½', 0.75: '¾' };
-function formatThickness(inches) {
+function formatThicknessInches(inches) {
   const whole = Math.floor(inches);
   const frac  = Math.round((inches - whole) * 4) / 4; // snap to nearest 0.25
   const fracStr = QUARTER_FRACTIONS[frac] ?? '';
   return whole === 0 ? `${fracStr}"` : fracStr ? `${whole}${fracStr}"` : `${whole}"`;
+}
+
+function formatThicknessDisplay(inches, useCelsius) {
+  if (useCelsius) return `${inchesToCm(inches)} cm`;
+  return formatThicknessInches(inches);
 }
 
 // Default slider label positions (0.5–3.0) — used when item has no custom range
@@ -22,7 +27,16 @@ const DEFAULT_SLIDER_LABELS = [
   { label: '3"', value: 3.0 },
 ];
 
-export default function CookingMethodScreen({ selection, navigate, goBack, SCREENS }) {
+// Metric equivalents for default slider labels
+const DEFAULT_SLIDER_LABELS_CM = [
+  { label: '1.3 cm', value: 0.5 },
+  { label: '2.5 cm', value: 1.0 },
+  { label: '3.8 cm', value: 1.5 },
+  { label: '5.1 cm', value: 2.0 },
+  { label: '7.6 cm', value: 3.0 },
+];
+
+export default function CookingMethodScreen({ selection, navigate, goBack, SCREENS, useCelsius }) {
   const category = getCategoryById(selection.categoryId);
   const item = getItemById(selection.categoryId, selection.itemId);
   if (!category || !item) return null;
@@ -32,7 +46,13 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
   const sliderMax     = item.sliderMax     ?? 3.0;
   const sliderStep    = item.sliderStep    ?? 0.25;
   const sliderDefault = item.sliderDefault ?? 1.0;
-  const sliderLabels  = item.sliderLabels  ?? DEFAULT_SLIDER_LABELS;
+  const sliderLabelsInches = item.sliderLabels ?? DEFAULT_SLIDER_LABELS;
+  const sliderLabels = useCelsius
+    ? sliderLabelsInches.map(({ label: _l, value }) => ({
+        label: `${inchesToCm(value)} cm`,
+        value,
+      }))
+    : sliderLabelsInches;
 
   const [thickness, setThickness] = useState(selection.thicknessInches ?? sliderDefault);
   const [geometry, setGeometry]   = useState(selection.geometry ?? (item.defaultGeometry ?? 'slab'));
@@ -78,7 +98,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
         <div className="thickness-section">
           <h4>{item.thicknessLabel ?? 'Thickness'}</h4>
           <div className="thickness-slider">
-            <div className="thickness-value">{formatThickness(thickness)}</div>
+            <div className="thickness-value">{formatThicknessDisplay(thickness, useCelsius)}</div>
             <input
               type="range"
               min={sliderMin}
@@ -207,7 +227,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
               <p>{method.description}</p>
               <div className="method-carryover">
                 {method.appliesCarryover
-                  ? <>Carryover: <strong>+{co.deltaF}°F</strong></>
+                  ? <>Carryover: <strong>{displayDeltaF(co.deltaF, useCelsius)}</strong></>
                   : <>{method.noCarryoverLabel ?? 'Bath = target • No carryover'}</>
                 }
                 {method.usesBastingPullTemps && (

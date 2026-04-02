@@ -901,6 +901,58 @@ export function cToF(c) {
 }
 
 /**
+ * Display a single temperature value with unit conversion.
+ * All internal values are in °F; pass useCelsius=true to show °C.
+ */
+export function displayTemp(f, useCelsius = false) {
+  if (f == null) return '—';
+  if (useCelsius) return `${fToC(f)}°C`;
+  return `${Math.round(f)}°F`;
+}
+
+/**
+ * Like formatTemp but with optional celsius conversion.
+ * temp can be: number | [min, max] | {min, max} | null/undefined
+ */
+export function formatTempDisplay(temp, useCelsius = false) {
+  if (temp === null || temp === undefined) return '—';
+  const unit = useCelsius ? 'C' : 'F';
+  if (Array.isArray(temp)) {
+    const [a, b] = useCelsius ? [fToC(temp[0]), fToC(temp[1])] : temp;
+    return `${a}–${b}°${unit}`;
+  }
+  if (typeof temp === 'object') {
+    const [a, b] = useCelsius ? [fToC(temp.min), fToC(temp.max)] : [temp.min, temp.max];
+    return `${a}–${b}°${unit}`;
+  }
+  return useCelsius ? `${fToC(temp)}°C` : `${Math.round(temp)}°F`;
+}
+
+/**
+ * Display a temperature delta (e.g. carryover rise).
+ * A Δ°F is converted to Δ°C by × 5/9.
+ */
+export function displayDeltaF(deltaF, useCelsius = false) {
+  if (deltaF == null) return '—';
+  if (useCelsius) {
+    const deltaC = Math.round(deltaF * 5 / 9 * 10) / 10;
+    return `${deltaC > 0 ? '+' : ''}${deltaC}°C`;
+  }
+  return `${deltaF > 0 ? '+' : ''}${deltaF}°F`;
+}
+
+/** Convert inches to centimetres, rounded to 1 decimal */
+export function inchesToCm(inches) {
+  return Math.round(inches * 2.54 * 10) / 10;
+}
+
+/** Display a thickness value with unit conversion. */
+export function displayThickness(inches, useCelsius = false) {
+  if (useCelsius) return `${inchesToCm(inches)} cm`;
+  return `${inches}"`;
+}
+
+/**
  * Given current temp, pull temp, and carryover delta:
  * Returns a status object describing where in the cook we are.
  */

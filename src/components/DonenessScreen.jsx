@@ -1,8 +1,8 @@
 import { getCategoryById, getItemById } from '../data/temperatures';
-import { formatTemp } from '../utils/carryover';
+import { formatTemp, displayTemp, fToC } from '../utils/carryover';
 import NavBar from './NavBar';
 
-export default function DonenessScreen({ selection, navigate, goBack, SCREENS }) {
+export default function DonenessScreen({ selection, navigate, goBack, SCREENS, useCelsius }) {
   const category = getCategoryById(selection.categoryId);
   const item = getItemById(selection.categoryId, selection.itemId);
   if (!category || !item) return null;
@@ -27,20 +27,21 @@ export default function DonenessScreen({ selection, navigate, goBack, SCREENS })
       <div className="doneness-list">
         {item.doneness.map((d, i) => {
           const isWellDone = d.level === 'Well Done';
+          const unit = useCelsius ? 'C' : 'F';
           const endDisplay = isWellDone
             ? '¯\\_(ツ)_/¯'
             : d.endTemp
               ? typeof d.endTemp === 'object'
-                ? `${d.endTemp.min}–${d.endTemp.max}°F`
-                : `${d.endTemp}°F`
+                ? `${useCelsius ? fToC(d.endTemp.min) : d.endTemp.min}–${useCelsius ? fToC(d.endTemp.max) : d.endTemp.max}°${unit}`
+                : displayTemp(d.endTemp, useCelsius)
               : '—';
 
           const pullDisplay = isWellDone
             ? '—'
             : d.pullTemp
               ? typeof d.pullTemp === 'object'
-                ? `Pull ${d.pullTemp.min}–${d.pullTemp.max}°F`
-                : `Pull ${d.pullTemp}°F`
+                ? `Pull ${useCelsius ? fToC(d.pullTemp.min) : d.pullTemp.min}–${useCelsius ? fToC(d.pullTemp.max) : d.pullTemp.max}°${unit}`
+                : `Pull ${displayTemp(d.pullTemp, useCelsius)}`
               : '—';
 
           return (

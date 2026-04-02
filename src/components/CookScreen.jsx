@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
-import { estimateCarryover, formatTemp, getCookStatus } from '../utils/carryover';
+import { estimateCarryover, formatTemp, getCookStatus, displayTemp, displayDeltaF, formatTempDisplay, displayThickness, fToC, cToF } from '../utils/carryover';
 import { estimateMicrowaveTime } from '../utils/microwaveTime';
 import { THERMOMETER_STATE } from '../constants/thermometer';
 import useCookHistory from '../hooks/useCookHistory';
@@ -9,7 +9,7 @@ import TempGauge from './TempGauge';
 import ThermoBar from './ThermoBar';
 import CookChart from './CookChart';
 
-export default function CookScreen({ selection, thermo, navigate, goBack, SCREENS }) {
+export default function CookScreen({ selection, thermo, navigate, goBack, SCREENS, useCelsius }) {
   const [manualTemp, setManualTemp] = useState('');
   // Custom target temperature override — null means use the recommendation from data
   const [customEndTemp, setCustomEndTemp] = useState(null);
@@ -21,7 +21,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
   const isConnected = thermo.state === THERMOMETER_STATE.CONNECTED;
   const currentTemp = isConnected
     ? thermo.coreTemp
-    : (manualTemp !== '' ? parseFloat(manualTemp) : null);
+    : (manualTemp !== '' ? (useCelsius ? cToF(parseFloat(manualTemp)) : parseFloat(manualTemp)) : null);
   const cookHistory = useCookHistory(currentTemp, isConnected ? thermo.surfaceTemp : null);
 
   const category = getCategoryById(selection.categoryId);
@@ -59,12 +59,18 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
   const effectiveEndTemp = customEndTemp ?? rawEndTemp;
 
   const endTempDisplay = customEndTemp != null
-    ? `${customEndTemp}°F`
+    ? displayTemp(customEndTemp, useCelsius)
     : (doneness
-        ? (doneness.endTemp != null && typeof doneness.endTemp === 'object'
-            ? `${doneness.endTemp.min}–${doneness.endTemp.max}°F`
-            : `${doneness.endTemp ?? doneness.sousVideTemp ?? '—'}°F`)
-        : formatTemp(Array.isArray(item.endTempRange) ? item.endTempRange : (item.endTemp ?? item.pullTemp)));
+        ? formatTempDisplay(
+            doneness.endTemp != null && typeof doneness.endTemp === 'object'
+              ? doneness.endTemp
+              : (doneness.endTemp ?? doneness.sousVideTemp),
+            useCelsius
+          )
+        : formatTempDisplay(
+            Array.isArray(item.endTempRange) ? item.endTempRange : (item.endTemp ?? item.pullTemp),
+            useCelsius
+          ));
 
   // Resolve rest time: doneness level takes priority over item level
   const restMinutes = isBasting
@@ -174,17 +180,22 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
                           : 'modeled';
 
     // Verdict based on delta from target
+    const deltaDisplay = deltaFromTarget != null
+      ? (useCelsius
+          ? `${Math.round(Math.abs(deltaFromTarget) * 5 / 9 * 10) / 10}°C`
+          : `${Math.abs(deltaFromTarget)}°F`)
+      : null;
     let verdict, verdictColor, verdictIcon;
     if (deltaFromTarget == null) {
       verdict = 'No target set'; verdictColor = 'var(--text-tertiary)'; verdictIcon = '—';
     } else if (deltaFromTarget > 5) {
-      verdict = `Overshoot — ${deltaFromTarget}°F past target`; verdictColor = '#ff4b4b'; verdictIcon = '⚠️';
+      verdict = `Overshoot — ${deltaDisplay} past target`; verdictColor = '#ff4b4b'; verdictIcon = '⚠️';
     } else if (deltaFromTarget >= -2) {
       verdict = 'On target — pull now!'; verdictColor = '#4cde80'; verdictIcon = '✅';
     } else if (deltaFromTarget >= -7) {
-      verdict = `Almost there — ${Math.abs(deltaFromTarget)}°F away`; verdictColor = '#f5a623'; verdictIcon = '⚡';
+      verdict = `Almost there — ${deltaDisplay} away`; verdictColor = '#f5a623'; verdictIcon = '⚡';
     } else {
-      verdict = `Keep cooking — ${Math.abs(deltaFromTarget)}°F below target`; verdictColor = 'var(--text-secondary)'; verdictIcon = '⏳';
+      verdict = `Keep cooking — ${deltaDisplay} below target`; verdictColor = 'var(--text-secondary)'; verdictIcon = '⏳';
     }
 
     return { preview, projectedPeak, deltaFromTarget, verdict, verdictColor, verdictIcon, surfaceSource, liveSurfaceTemp, liveGradient };
@@ -193,7 +204,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     selection.thicknessInches, selection.geometry, selection.isWrapped, selection.boneIn,
     restMinutes, effectiveEndTemp,
     thermo.surfaceTemp, thermo.sensors, thermo.virtualCoreIndex,
-    thermo.virtualSurfaceIndex, thermo.isInstantRead, isConnected, ambientTempF,
+    thermo.virtualSurfaceIndex, thermo.isInstantRead, isConnected, ambientTempF, useCelsius,
   ]);
 
   const handlePull = () => {
@@ -243,12 +254,12 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           <label>Current temp</label>
           <input
             type="number"
-            placeholder="Enter °F"
+            placeholder={useCelsius ? 'Enter °C' : 'Enter °F'}
             value={manualTemp}
             onChange={e => setManualTemp(e.target.value)}
             inputMode="decimal"
           />
-          <span className="unit">°F</span>
+          <span className="unit">{useCelsius ? '°C' : '°F'}</span>
         </div>
       )}
 
@@ -306,7 +317,9 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
                   onKeyDown={e => {
                     if (e.key === 'Enter') {
                       const parsed = parseFloat(targetInputVal);
-                      if (!isNaN(parsed) && parsed > 32 && parsed < 600) setCustomEndTemp(Math.round(parsed));
+                      const parsedF = useCelsius ? cToF(parsed) : parsed;
+                      const valid = useCelsius ? (parsed > 0 && parsed < 316) : (parsed > 32 && parsed < 600);
+                      if (!isNaN(parsed) && valid) setCustomEndTemp(Math.round(parsedF));
                       setEditingTarget(false);
                     } else if (e.key === 'Escape') {
                       setEditingTarget(false);
@@ -314,7 +327,9 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
                   }}
                   onBlur={() => {
                     const parsed = parseFloat(targetInputVal);
-                    if (!isNaN(parsed) && parsed > 32 && parsed < 600) setCustomEndTemp(Math.round(parsed));
+                    const parsedF = useCelsius ? cToF(parsed) : parsed;
+                    const valid = useCelsius ? (parsed > 0 && parsed < 316) : (parsed > 32 && parsed < 600);
+                    if (!isNaN(parsed) && valid) setCustomEndTemp(Math.round(parsedF));
                     setEditingTarget(false);
                   }}
                   style={{
@@ -323,13 +338,17 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
                     padding: '2px 6px', textAlign: 'right',
                   }}
                 />
-                <span style={{ fontSize: 16, fontWeight: 700 }}>°F</span>
+                <span style={{ fontSize: 16, fontWeight: 700 }}>{useCelsius ? '°C' : '°F'}</span>
               </span>
             ) : (
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="cook-card-value">{endTempDisplay}</span>
                 <button
-                  onClick={() => { setTargetInputVal(customEndTemp ?? rawEndTemp ?? ''); setEditingTarget(true); }}
+                  onClick={() => {
+                    const valF = customEndTemp ?? rawEndTemp;
+                    setTargetInputVal(valF != null ? (useCelsius ? fToC(valF) : valF) : '');
+                    setEditingTarget(true);
+                  }}
                   title="Edit target temperature"
                   style={{
                     background: 'none', border: 'none', cursor: 'pointer', padding: 2,
@@ -367,13 +386,13 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           <div className="cook-card-header">
             <span className="cook-card-title">Recommended Pull Temperature</span>
             <span className="cook-card-value" style={{ color: shouldPull ? '#ff6b4a' : category.accentColor }}>
-              {displayPullTemp ? `${displayPullTemp}°F` : '—'}
+              {displayPullTemp ? displayTemp(displayPullTemp, useCelsius) : '—'}
             </span>
           </div>
           {method.id !== 'sous-vide' && (
             <div className="carryover-row">
               <span className="label">
-                {displayPullTemp}°F + {co.deltaF}°F carryover = {endTempDisplay}
+                {displayTemp(displayPullTemp, useCelsius)} {displayDeltaF(co.deltaF, useCelsius)} carryover = {endTempDisplay}
               </span>
             </div>
           )}
@@ -397,7 +416,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           <div className="cook-card">
             <div className="cook-card-header">
               <span className="cook-card-title">Carryover Physics</span>
-              <span className="cook-card-value" style={{ color: '#f5a623' }}>+{co.deltaF}°F</span>
+              <span className="cook-card-value" style={{ color: '#f5a623' }}>{displayDeltaF(co.deltaF, useCelsius)}</span>
             </div>
             <div className="carryover-row">
               <span className="label">Method</span>
@@ -410,13 +429,13 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               </span>
               <span className="val">
                 {isConnected && thermo.surfaceTemp != null
-                  ? `${thermo.surfaceTemp.toFixed(1)}°F (probe)`
-                  : `${co.surfaceTempAtPull}°F (est.)`}
+                  ? `${displayTemp(thermo.surfaceTemp, useCelsius)} (probe)`
+                  : `${displayTemp(co.surfaceTempAtPull, useCelsius)} (est.)`}
               </span>
             </div>
             <div className="carryover-row">
               <span className="label">Thickness</span>
-              <span className="val">{selection.thicknessInches}"</span>
+              <span className="val">{displayThickness(selection.thicknessInches, useCelsius)}</span>
             </div>
             <div className="carryover-row">
               <span className="label">Biot number (Bi)</span>
@@ -447,13 +466,13 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
             <div className="pull-now-hero">
               <div className="pull-now-hero-col">
                 <div className="pull-now-hero-label">Core now</div>
-                <div className="pull-now-hero-temp">{currentTemp?.toFixed(1)}°F</div>
+                <div className="pull-now-hero-temp">{displayTemp(currentTemp, useCelsius)}</div>
               </div>
-              <div className="pull-now-hero-arrow">+ {pullNowPreview.preview.deltaF}°F →</div>
+              <div className="pull-now-hero-arrow">{displayDeltaF(pullNowPreview.preview.deltaF, useCelsius)} →</div>
               <div className="pull-now-hero-col">
                 <div className="pull-now-hero-label">Projected peak</div>
                 <div className="pull-now-hero-temp" style={{ color: pullNowPreview.verdictColor }}>
-                  {pullNowPreview.projectedPeak}°F
+                  {displayTemp(pullNowPreview.projectedPeak, useCelsius)}
                 </div>
               </div>
             </div>
@@ -463,7 +482,11 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <div className="carryover-row">
                 <span className="label">vs Target final</span>
                 <span className="val" style={{ color: pullNowPreview.verdictColor }}>
-                  {pullNowPreview.deltaFromTarget > 0 ? '+' : ''}{pullNowPreview.deltaFromTarget}°F ({endTempDisplay})
+                  {pullNowPreview.deltaFromTarget > 0 ? '+' : ''}
+                  {useCelsius
+                    ? `${Math.round(pullNowPreview.deltaFromTarget * 5 / 9 * 10) / 10}°C`
+                    : `${pullNowPreview.deltaFromTarget}°F`
+                  } ({endTempDisplay})
                 </span>
               </div>
             )}
@@ -476,10 +499,10 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               </span>
               <span className="val">
                 {pullNowPreview.surfaceSource === 'finite-diff'
-                  ? `${pullNowPreview.preview.surfaceGradientF}°F (${pullNowPreview.liveGradient?.length}-sensor FD)`
+                  ? `${displayTemp(pullNowPreview.preview.surfaceGradientF, useCelsius)} (${pullNowPreview.liveGradient?.length}-sensor FD)`
                   : pullNowPreview.liveSurfaceTemp != null
-                    ? `${pullNowPreview.liveSurfaceTemp.toFixed(1)}°F (probe)`
-                    : `${pullNowPreview.preview.surfaceTempAtPull}°F (est.)`
+                    ? `${displayTemp(pullNowPreview.liveSurfaceTemp, useCelsius)} (probe)`
+                    : `${displayTemp(pullNowPreview.preview.surfaceTempAtPull, useCelsius)} (est.)`
                 }
               </span>
             </div>
@@ -495,8 +518,8 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <span className="label">Ambient {isConnected && thermo.ambientTemp != null ? '🌡' : '(assumed)'}</span>
               <span className="val">
                 {isConnected && thermo.ambientTemp != null
-                  ? `${thermo.ambientTemp.toFixed(1)}°F (probe)`
-                  : '72°F (room temp)'}
+                  ? `${displayTemp(thermo.ambientTemp, useCelsius)} (probe)`
+                  : `${displayTemp(72, useCelsius)} (room temp)`}
               </span>
             </div>
 
@@ -544,11 +567,11 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               </div>
               <div className="carryover-row">
                 <span className="label">Thickness</span>
-                <span className="val">{selection.thicknessInches}"</span>
+                <span className="val">{displayThickness(selection.thicknessInches, useCelsius)}</span>
               </div>
               <div className="carryover-row">
                 <span className="label">Target pull temp</span>
-                <span className="val">{displayPullTemp}°F</span>
+                <span className="val">{displayTemp(displayPullTemp, useCelsius)}</span>
               </div>
               <p style={{ fontSize: 12, color: 'rgba(240,240,240,0.5)', marginTop: 8, lineHeight: 1.5 }}>
                 {mw.note} Use a thermometer — microwave times are approximate due to hot spots and wattage variation.
@@ -563,7 +586,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
             <span>🌯</span>
             <div>
               <span>Wrap at </span>
-              <strong>{item.wrapTemp.min}–{item.wrapTemp.max}°F</strong>
+              <strong>{formatTempDisplay(item.wrapTemp, useCelsius)}</strong>
               <br />
               <span style={{ fontSize: 12, color: 'rgba(240,240,240,0.4)' }}>
                 When fat is visibly bubbling and rendering
@@ -601,7 +624,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         <div className="pull-alert" style={{ margin: '0 20px 20px' }}>
           <span>🚨</span>
           <div>
-            <p>Pull now! {currentTemp?.toFixed(1)}°F reached</p>
+            <p>Pull now! {displayTemp(currentTemp, useCelsius)} reached</p>
             <p style={{ fontSize: 12, fontWeight: 400, marginTop: 2 }}>
               Carryover will carry it to {endTempDisplay}
             </p>

@@ -1,13 +1,13 @@
 import { useMemo, useEffect, useRef } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
-import { estimateCarryover } from '../utils/carryover';
+import { estimateCarryover, displayTemp, displayDeltaF, displayThickness, fToC } from '../utils/carryover';
 import { THERMOMETER_STATE } from '../constants/thermometer';
 import useRestTimer from '../hooks/useRestTimer';
 import NavBar from './NavBar';
 import CarryoverChart from './CarryoverChart';
 import { buildLogEntry, saveLogEntry } from '../utils/cookLog';
 
-export default function RestScreen({ selection, thermo, navigate, goBack, startOver, SCREENS }) {
+export default function RestScreen({ selection, thermo, navigate, goBack, startOver, SCREENS, useCelsius }) {
   const category = getCategoryById(selection.categoryId);
   const item = getItemById(selection.categoryId, selection.itemId);
   const method = getMethodById(selection.methodId);
@@ -167,13 +167,16 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
     saveLogEntry(entry);
   }, [timer.isComplete]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const unit = useCelsius ? 'C' : 'F';
   const endTempDisplay = doneness
     ? (doneness.endTemp != null && typeof doneness.endTemp === 'object'
-        ? `${doneness.endTemp.min}–${doneness.endTemp.max}°F`
-        : `${doneness.endTemp ?? doneness.sousVideTemp ?? '—'}°F`)
+        ? `${useCelsius ? fToC(doneness.endTemp.min) : doneness.endTemp.min}–${useCelsius ? fToC(doneness.endTemp.max) : doneness.endTemp.max}°${unit}`
+        : displayTemp(doneness.endTemp ?? doneness.sousVideTemp, useCelsius))
     : (() => {
-        if (Array.isArray(item.endTempRange)) return `${item.endTempRange[0]}–${item.endTempRange[1]}°F`;
-        return `${item.endTemp ?? '—'}°F`;
+        if (Array.isArray(item.endTempRange)) {
+          return `${useCelsius ? fToC(item.endTempRange[0]) : item.endTempRange[0]}–${useCelsius ? fToC(item.endTempRange[1]) : item.endTempRange[1]}°${unit}`;
+        }
+        return displayTemp(item.endTemp, useCelsius);
       })();
 
   const formatTime = (totalSec) => {
@@ -189,8 +192,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   const dashOffset = circumference * (1 - timer.progressPct / 100);
 
   // Physics display helpers
-  const thicknessDisplay = selection.thicknessInches
-    ? `${selection.thicknessInches}"` : '1.0"';
+  const thicknessDisplay = displayThickness(selection.thicknessInches ?? 1.0, useCelsius);
 
   const categoryLabel = {
     beef: 'Mammalian', pork: 'Mammalian', poultry: 'Avian',
@@ -210,7 +212,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <div>
             <div>Rest complete — time to eat!</div>
             <div style={{ fontSize: 13, fontWeight: 400, marginTop: 2, opacity: 0.7 }}>
-              Peak temp reached: ~{carryover.peakTempF.toFixed(1)}°F
+              Peak temp reached: ~{displayTemp(carryover.peakTempF, useCelsius)}
             </div>
           </div>
         </div>
@@ -309,7 +311,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
           <span className="cook-card-value" style={{
             color: timer.hasReachedTarget ? '#4cde80' : '#f5a623',
           }}>
-            {timer.isLiveTemp ? '' : '~'}{timer.estimatedCurrentTempF}°F
+            {timer.isLiveTemp ? '' : '~'}{displayTemp(timer.estimatedCurrentTempF, useCelsius)}
             {timer.isLiveTemp && (
               <span style={{ fontSize: 10, marginLeft: 4, color: '#4cde80' }}>🌡 live</span>
             )}
@@ -346,7 +348,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
             {timer.isLiveTemp ? '🌡 Core temp (live)' : 'Est. core temp'}
           </span>
           <span className="val" style={{ color: timer.isLiveTemp ? '#4cde80' : '#f5a623' }}>
-            {timer.isLiveTemp ? '' : '~'}{timer.estimatedCurrentTempF}°F
+            {timer.isLiveTemp ? '' : '~'}{displayTemp(timer.estimatedCurrentTempF, useCelsius)}
           </span>
         </div>
         <div className="carryover-row">
@@ -354,17 +356,17 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
             {hasMeasuredData ? '🌡 Surface temp at pull (measured)' : 'Est. surface temp at pull'}
           </span>
           <span className="val" style={{ color: hasMeasuredData ? '#4cde80' : 'var(--text-primary)' }}>
-            {carryover.surfaceTempAtPull}°F
+            {displayTemp(carryover.surfaceTempAtPull, useCelsius)}
           </span>
         </div>
         <div className="carryover-row">
           <span className="label">Ambient {selection.actualAmbientTempF != null ? '🌡' : ''}</span>
           <span className="val" style={ambientWasClamped ? { color: '#f5a623' } : {}}>
             {ambientWasClamped
-              ? `${restAmbientF}°F (clamped — probe read ${rawAmbientF.toFixed(0)}°F cooking env)`
+              ? `${displayTemp(restAmbientF, useCelsius)} (clamped — probe read ${displayTemp(rawAmbientF, useCelsius)} cooking env)`
               : rawAmbientF != null && rawAmbientF !== 72
-                ? `${rawAmbientF.toFixed(1)}°F (probe)`
-                : '72°F (assumed)'}
+                ? `${displayTemp(rawAmbientF, useCelsius)} (probe)`
+                : `${displayTemp(72, useCelsius)} (assumed)`}
           </span>
         </div>
         {timer.isRunning && (
@@ -375,29 +377,32 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
             <span className="val" style={{
               color: timer.tempSlopePerMin > 0 ? '#f5a623' : timer.tempSlopePerMin < 0 ? '#66bbff' : 'var(--text-primary)',
             }}>
-              {timer.tempSlopePerMin > 0 ? '+' : ''}{timer.tempSlopePerMin}°F/min
+              {timer.tempSlopePerMin > 0 ? '+' : ''}
+              {useCelsius
+                ? `${Math.round(timer.tempSlopePerMin * 5 / 9 * 10) / 10}°C/min`
+                : `${timer.tempSlopePerMin}°F/min`}
             </span>
           </div>
         )}
         <div className="carryover-row">
           <span className="label">Pull temp</span>
-          <span className="val">{timer.adjustedPullTempF}°F</span>
+          <span className="val">{displayTemp(timer.adjustedPullTempF, useCelsius)}</span>
         </div>
         <div className="carryover-row">
           <span className="label">Target final</span>
           <span className="val">{endTempDisplay}</span>
         </div>
         <div className="carryover-row">
-          <span className="label">Original est. at pull (+{timer.initialCarryover.deltaF}°F)</span>
+          <span className="label">Original est. at pull ({displayDeltaF(timer.initialCarryover.deltaF, useCelsius)})</span>
           <span className="val" style={{ color: 'var(--text-secondary)' }}>
-            {timer.initialCarryover.peakTempF.toFixed(1)}°F
+            {displayTemp(timer.initialCarryover.peakTempF, useCelsius)}
           </span>
         </div>
         <div className="carryover-row">
           <span className="label">
-            {timer.isAssimilating ? 'Live-updated est.' : 'Est. peak'} (+{carryover.deltaF}°F)
+            {timer.isAssimilating ? 'Live-updated est.' : 'Est. peak'} ({displayDeltaF(carryover.deltaF, useCelsius)})
           </span>
-          <span className="val" style={{ color: '#f5a623' }}>{carryover.peakTempF.toFixed(1)}°F</span>
+          <span className="val" style={{ color: '#f5a623' }}>{displayTemp(carryover.peakTempF, useCelsius)}</span>
         </div>
         <div className="carryover-row">
           <span className="label">Time to peak</span>
@@ -503,8 +508,8 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
               : hasMeasuredData
                 ? '🌡 T_surface − T_core (probe)'
                 : 'ΔT surface→core (model)'}
-            value={`${carryover.surfaceGradientF}°F`}
-            detail={`Surface ${carryover.surfaceTempAtPull}°F → Core ${timer.adjustedPullTempF}°F at pull`}
+            value={displayTemp(carryover.surfaceGradientF, useCelsius)}
+            detail={`Surface ${displayTemp(carryover.surfaceTempAtPull, useCelsius)} → Core ${displayTemp(timer.adjustedPullTempF, useCelsius)} at pull`}
           />
           <PhysicsParam
             label="Fraction Reached"
@@ -560,7 +565,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
               <div className="physics-formula-label">Finite-Difference Model</div>
               <div className="physics-formula-eq">∂T/∂t = α · ∇²T (numerically integrated)</div>
               <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                {sensorGradientF.length}-sensor gradient → <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
+                {sensorGradientF.length}-sensor gradient → <span style={{ color: '#f5a623' }}>{displayDeltaF(carryover.deltaF, useCelsius)}</span>
               </div>
             </>
           ) : (
@@ -573,7 +578,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
                 ΔT = gradient × (1 − θ*) × penetration
               </div>
               <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                {carryover.surfaceGradientF}°F × {carryover.fractionReached} × {carryover.penetrationFactor?.toFixed(3)} = <span style={{ color: '#f5a623' }}>+{carryover.deltaF}°F</span>
+                {displayTemp(carryover.surfaceGradientF, useCelsius)} × {carryover.fractionReached} × {carryover.penetrationFactor?.toFixed(3)} = <span style={{ color: '#f5a623' }}>{displayDeltaF(carryover.deltaF, useCelsius)}</span>
               </div>
             </>
           )}

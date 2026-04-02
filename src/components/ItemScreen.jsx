@@ -1,8 +1,8 @@
 import { getCategoryById } from '../data/temperatures';
-import { formatTemp } from '../utils/carryover';
+import { formatTemp, formatTempDisplay, fToC } from '../utils/carryover';
 import NavBar from './NavBar';
 
-export default function ItemScreen({ selection, navigate, goBack, SCREENS }) {
+export default function ItemScreen({ selection, navigate, goBack, SCREENS, useCelsius }) {
   const category = getCategoryById(selection.categoryId);
   if (!category) return null;
 
@@ -27,9 +27,15 @@ export default function ItemScreen({ selection, navigate, goBack, SCREENS }) {
 
       <div className="item-list">
         {category.items.map(item => {
+          const unit = useCelsius ? 'C' : 'F';
           const endTempDisplay = item.hasDoneness
-            ? `${item.doneness[1]?.endTemp?.min ?? '—'}–${item.doneness[item.doneness.length - 2]?.endTemp?.max ?? '—'}°F`
-            : formatTemp(item.endTemp ?? item.endTempRange ?? item.pullTemp);
+            ? (() => {
+                const min = item.doneness[1]?.endTemp?.min;
+                const max = item.doneness[item.doneness.length - 2]?.endTemp?.max;
+                if (min == null || max == null) return '—';
+                return `${useCelsius ? fToC(min) : min}–${useCelsius ? fToC(max) : max}°${unit}`;
+              })()
+            : formatTempDisplay(item.endTemp ?? item.endTempRange ?? item.pullTemp, useCelsius);
 
           return (
             <button

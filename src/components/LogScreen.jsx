@@ -1,15 +1,19 @@
 import { useState, useEffect } from 'react';
 import { loadLog, deleteLogEntry, clearLog, exportCSV } from '../utils/cookLog';
+import { displayTemp, displayDeltaF, displayThickness, fToC } from '../utils/carryover';
 import NavBar from './NavBar';
 
-function ErrorBadge({ errorF }) {
+function ErrorBadge({ errorF, useCelsius }) {
   if (errorF == null) return <span className="log-badge log-badge--neutral">No data</span>;
   const abs = Math.abs(errorF);
   const sign = errorF >= 0 ? '+' : '−';
   const cls = abs <= 1 ? 'log-badge--good' : abs <= 3 ? 'log-badge--warn' : 'log-badge--bad';
+  const displayVal = useCelsius
+    ? `${Math.round(abs * 5 / 9 * 10) / 10}°C`
+    : `${abs.toFixed(1)}°F`;
   return (
     <span className={`log-badge ${cls}`}>
-      {sign}{abs.toFixed(1)}°F
+      {sign}{displayVal}
     </span>
   );
 }
@@ -26,7 +30,7 @@ function DetailRow({ label, value, highlight }) {
   );
 }
 
-function LogEntry({ entry, onDelete }) {
+function LogEntry({ entry, onDelete, useCelsius }) {
   const [expanded, setExpanded] = useState(false);
 
   const date = new Date(entry.timestamp);
@@ -46,17 +50,21 @@ function LogEntry({ entry, onDelete }) {
         <div className="log-entry-left">
           <div className="log-entry-cut">{cutLabel}</div>
           <div className="log-entry-meta">
-            {entry.methodLabel} · {entry.thicknessInches}" · {dateStr} {timeStr}
+            {entry.methodLabel} · {displayThickness(entry.thicknessInches, useCelsius)} · {dateStr} {timeStr}
           </div>
         </div>
         <div className="log-entry-right">
           <div className="log-entry-temps">
-            <span className="log-temp-pred" title="Original estimate at pull">est {entry.predictedPeakF?.toFixed(1)}°</span>
+            <span className="log-temp-pred" title="Original estimate at pull">
+              est {entry.predictedPeakF != null ? displayTemp(entry.predictedPeakF, useCelsius) : '—'}
+            </span>
             {entry.actualPeakF != null && (
-              <span className="log-temp-actual" title="Actual measured peak">{entry.actualPeakF?.toFixed(1)}°</span>
+              <span className="log-temp-actual" title="Actual measured peak">
+                {displayTemp(entry.actualPeakF, useCelsius)}
+              </span>
             )}
           </div>
-          <ErrorBadge errorF={entry.errorF} />
+          <ErrorBadge errorF={entry.errorF} useCelsius={useCelsius} />
           <span className="log-chevron">{expanded ? '▲' : '▼'}</span>
         </div>
       </button>
@@ -70,7 +78,7 @@ function LogEntry({ entry, onDelete }) {
             <DetailRow label="Cut"         value={entry.itemLabel} />
             <DetailRow label="Doneness"    value={entry.donenessLabel} />
             <DetailRow label="Method"      value={entry.methodLabel} />
-            <DetailRow label="Thickness"   value={`${entry.thicknessInches}"`} />
+            <DetailRow label="Thickness"   value={displayThickness(entry.thicknessInches, useCelsius)} />
             <DetailRow label="Geometry"    value={entry.geometry} />
             <DetailRow label="Bone-in"     value={entry.boneIn ? 'Yes' : 'No'} />
             <DetailRow label="Wrapped"     value={entry.isWrapped ? 'Yes' : 'No'} />
@@ -78,17 +86,17 @@ function LogEntry({ entry, onDelete }) {
 
           <div className="log-detail-section">
             <div className="log-detail-section-title">At Pull</div>
-            <DetailRow label="Core"    value={entry.pullCoreTempF != null ? `${entry.pullCoreTempF.toFixed(1)}°F` : null} highlight />
-            <DetailRow label="Surface" value={entry.pullSurfaceTempF != null ? `${entry.pullSurfaceTempF.toFixed(1)}°F` : null} />
+            <DetailRow label="Core"    value={entry.pullCoreTempF != null ? displayTemp(entry.pullCoreTempF, useCelsius) : null} highlight />
+            <DetailRow label="Surface" value={entry.pullSurfaceTempF != null ? displayTemp(entry.pullSurfaceTempF, useCelsius) : null} />
             <DetailRow
               label="Ambient (probe)"
-              value={entry.pullAmbientTempF != null ? `${entry.pullAmbientTempF.toFixed(1)}°F${entry.ambientWasClamped ? ' ⚠ cooking env' : ''}` : '—'}
+              value={entry.pullAmbientTempF != null ? `${displayTemp(entry.pullAmbientTempF, useCelsius)}${entry.ambientWasClamped ? ' ⚠ cooking env' : ''}` : '—'}
             />
             <DetailRow
               label="Rest ambient used"
               value={entry.restAmbientF != null
-                ? `${entry.restAmbientF.toFixed(1)}°F${entry.ambientWasClamped ? ' (clamped from cooking env)' : ''}`
-                : '72°F (assumed)'}
+                ? `${displayTemp(entry.restAmbientF, useCelsius)}${entry.ambientWasClamped ? ' (clamped from cooking env)' : ''}`
+                : `${displayTemp(72, useCelsius)} (assumed)`}
               highlight={entry.ambientWasClamped}
             />
             {entry.sensorReadingsAtPull && (
@@ -115,10 +123,10 @@ function LogEntry({ entry, onDelete }) {
 
           <div className="log-detail-section">
             <div className="log-detail-section-title">Prediction</div>
-            <DetailRow label="Original est. ΔF (at pull)"   value={entry.predictedDeltaF != null ? `+${entry.predictedDeltaF.toFixed(1)}°F` : null} highlight />
-            <DetailRow label="Original est. peak (at pull)" value={entry.predictedPeakF != null ? `${entry.predictedPeakF.toFixed(1)}°F` : null} highlight />
+            <DetailRow label="Original est. Δ (at pull)"   value={entry.predictedDeltaF != null ? displayDeltaF(entry.predictedDeltaF, useCelsius) : null} highlight />
+            <DetailRow label="Original est. peak (at pull)" value={entry.predictedPeakF != null ? displayTemp(entry.predictedPeakF, useCelsius) : null} highlight />
             <DetailRow label="Min to peak"        value={entry.predictedMinutesToPeak != null ? `~${entry.predictedMinutesToPeak} min` : null} />
-            <DetailRow label="Surface gradient"   value={entry.surfaceGradientF != null ? `${entry.surfaceGradientF.toFixed(1)}°F` : null} />
+            <DetailRow label="Surface gradient"   value={entry.surfaceGradientF != null ? displayTemp(entry.surfaceGradientF, useCelsius) : null} />
             <DetailRow label="Gradient source"    value={entry.surfaceDataSource} />
             <DetailRow label="Fourier number"     value={entry.fourier != null ? entry.fourier.toFixed(3) : null} />
             <DetailRow label="Biot number"        value={entry.biot != null ? entry.biot.toFixed(3) : null} />
@@ -134,9 +142,9 @@ function LogEntry({ entry, onDelete }) {
             <div className="log-detail-section-title">Actual (measured)</div>
             {entry.hasLiveData ? (
               <>
-                <DetailRow label="Actual peak"      value={`${entry.actualPeakF?.toFixed(1)}°F`} highlight />
+                <DetailRow label="Actual peak"      value={entry.actualPeakF != null ? displayTemp(entry.actualPeakF, useCelsius) : null} highlight />
                 <DetailRow label="Time to peak"     value={`~${entry.actualMinutesToPeak?.toFixed(1)} min`} />
-                <DetailRow label="Error"            value={entry.errorF != null ? `${entry.errorF >= 0 ? '+' : ''}${entry.errorF.toFixed(1)}°F` : null}
+                <DetailRow label="Error"            value={entry.errorF != null ? `${entry.errorF >= 0 ? '+' : ''}${useCelsius ? `${Math.round(Math.abs(entry.errorF) * 5 / 9 * 10) / 10}°C` : `${entry.errorF.toFixed(1)}°F`}` : null}
                   highlight={entry.errorF != null && Math.abs(entry.errorF) > 2} />
                 <DetailRow label="Data points"      value={`${entry.liveHistoryPoints} readings`} />
               </>
@@ -157,7 +165,7 @@ function LogEntry({ entry, onDelete }) {
   );
 }
 
-export default function LogScreen({ goBack }) {
+export default function LogScreen({ goBack, useCelsius }) {
   const [log, setLog] = useState([]);
 
   useEffect(() => {
@@ -206,7 +214,10 @@ export default function LogScreen({ goBack }) {
               className="log-stat-value"
               style={{ color: Math.abs(avgError) <= 1 ? '#4cde80' : Math.abs(avgError) <= 3 ? '#f5a623' : '#ff6b6b' }}
             >
-              {avgError >= 0 ? '+' : ''}{avgError?.toFixed(1)}°F
+              {avgError >= 0 ? '+' : ''}
+              {useCelsius
+                ? `${Math.round(Math.abs(avgError) * 5 / 9 * 10) / 10}°C`
+                : `${avgError?.toFixed(1)}°F`}
             </div>
             <div className="log-stat-label">Avg error</div>
           </div>
@@ -215,7 +226,9 @@ export default function LogScreen({ goBack }) {
               className="log-stat-value"
               style={{ color: mae <= 1 ? '#4cde80' : mae <= 3 ? '#f5a623' : '#ff6b6b' }}
             >
-              ±{mae?.toFixed(1)}°F
+              ±{useCelsius
+                ? `${Math.round(mae * 5 / 9 * 10) / 10}°C`
+                : `${mae?.toFixed(1)}°F`}
             </div>
             <div className="log-stat-label">Mean abs error</div>
           </div>
@@ -246,7 +259,7 @@ export default function LogScreen({ goBack }) {
           </div>
         ) : (
           log.map(entry => (
-            <LogEntry key={entry.id} entry={entry} onDelete={handleDelete} />
+            <LogEntry key={entry.id} entry={entry} onDelete={handleDelete} useCelsius={useCelsius} />
           ))
         )}
       </div>
