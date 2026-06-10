@@ -1,8 +1,21 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { estimateCarryover } from '../utils/carryover';
+import { loadSession, updateSession } from '../utils/cookSession';
 
 /**
  * Manages the rest timer and live carryover temperature tracking.
+ *
+ * ## Timekeeping
+ *
+ * The timer is wall-clock based: elapsed = accumulated seconds from previous
+ * run segments (pauses) + (Date.now() − startEpoch) for the live segment.
+ * The 1 Hz setInterval is only a display-refresh trigger — browsers throttle
+ * timers in background tabs (Chrome: ~1 tick/min), which would make a
+ * tick-counting timer lose minutes of real elapsed time. A visibilitychange
+ * listener snaps the display to the correct value the moment the tab returns.
+ *
+ * Timer state is persisted via cookSession, so a rest in progress survives a
+ * page reload and resumes at the correct wall-clock elapsed time.
  *
  * ## Data assimilation
  *
@@ -64,18 +77,48 @@ export default function useRestTimer({
   isProbeConnected = false,
   onComplete,
 }) {
-  const [isRunning, setIsRunning]     = useState(false);
-  const [elapsedSec, setElapsedSec]   = useState(0);
-  const [isComplete, setIsComplete]   = useState(false);
+  const totalSec = restMinutes * 60;
+
+  // ── Wall-clock timer state (persisted — survives reload) ───────────
+  // App.jsx clears session.rest on each fresh navigation to the rest screen,
+  // so anything found here belongs to THIS rest and should be restored.
+  const savedRest     = useMemo(() => loadSession()?.rest ?? null, []);
+  const startEpochRef = useRef(
+    savedRest?.isRunning && !savedRest?.isComplete ? (savedRest.startEpochMs ?? null) : null,
+  );
+  const accumSecRef   = useRef(savedRest?.accumSec ?? 0);
+
+  const computeElapsed = () => {
+    const live = startEpochRef.current != null ? (Date.now() - startEpochRef.current) / 1000 : 0;
+    return accumSecRef.current + live;
+  };
+
+  const [isComplete, setIsComplete] = useState(() => !!savedRest?.isComplete);
+  const [isRunning, setIsRunning]   = useState(() =>
+    !!savedRest?.isRunning && !savedRest?.isComplete && savedRest?.startEpochMs != null);
+  const [elapsedSec, setElapsedSec] = useState(() =>
+    savedRest?.isComplete ? totalSec : Math.min(totalSec, Math.floor(computeElapsed())));
 
   // ── Assimilation state ──────────────────────────────────────────────
   const [assimilatedCarryover, setAssimilatedCarryover] = useState(null);
   const [assimilationCount, setAssimilationCount]       = useState(0);
   const [liveHistory, setLiveHistory]                   = useState([]);   // [{minute, tempF}]
 
-  const intervalRef    = useRef(null);
   const onCompleteRef  = useRef(onComplete);
   onCompleteRef.current = onComplete;
+
+  /** Persist timer position. Booleans are passed explicitly because React
+   *  state isn't readable synchronously right after a setState call. */
+  const persistRest = useCallback((flags) => {
+    updateSession({
+      rest: {
+        startEpochMs: startEpochRef.current,
+        accumSec:     Math.round(accumSecRef.current),
+        isRunning:    flags.isRunning,
+        isComplete:   flags.isComplete,
+      },
+    });
+  }, []);
 
   // Refs for values that change at 10 Hz — avoids re-renders per BLE notification
   const liveSensorsRef    = useRef(liveSensors);
@@ -140,53 +183,77 @@ export default function useRestTimer({
       ? Math.round(endTempF - initialCarryover.deltaF)
       : pullTempF);
 
-  const totalSec = restMinutes * 60;
-
   // ── Timer controls ──────────────────────────────────────────────────
   const start = useCallback(() => {
-    setIsRunning(true);
+    accumSecRef.current   = 0;
+    startEpochRef.current = Date.now();
     setElapsedSec(0);
+    setIsRunning(true);
     setIsComplete(false);
     setAssimilatedCarryover(null);
     setAssimilationCount(0);
     setLiveHistory([]);
-  }, []);
+    persistRest({ isRunning: true, isComplete: false });
+  }, [persistRest]);
 
-  const pause  = useCallback(() => setIsRunning(false), []);
-  const resume = useCallback(() => setIsRunning(true), []);
+  const pause = useCallback(() => {
+    if (startEpochRef.current != null) {
+      accumSecRef.current  += (Date.now() - startEpochRef.current) / 1000;
+      startEpochRef.current = null;
+    }
+    setIsRunning(false);
+    persistRest({ isRunning: false, isComplete: false });
+  }, [persistRest]);
+
+  const resume = useCallback(() => {
+    if (startEpochRef.current == null) startEpochRef.current = Date.now();
+    setIsRunning(true);
+    persistRest({ isRunning: true, isComplete: false });
+  }, [persistRest]);
 
   const reset = useCallback(() => {
-    setIsRunning(false);
+    accumSecRef.current   = 0;
+    startEpochRef.current = null;
     setElapsedSec(0);
+    setIsRunning(false);
     setIsComplete(false);
     setAssimilatedCarryover(null);
     setAssimilationCount(0);
     setLiveHistory([]);
-  }, []);
+    persistRest({ isRunning: false, isComplete: false });
+  }, [persistRest]);
 
-  // ── Main timer tick (1 Hz) ──────────────────────────────────────────
+  // ── Main timer tick (1 Hz display refresh; elapsed is wall-clock) ───
   useEffect(() => {
-    if (!isRunning) {
-      clearInterval(intervalRef.current);
-      return;
-    }
+    if (!isRunning) return;
 
-    intervalRef.current = setInterval(() => {
-      setElapsedSec(prev => {
-        const next = prev + 1;
-        if (next >= totalSec) {
-          setIsRunning(false);
-          setIsComplete(true);
-          clearInterval(intervalRef.current);
-          onCompleteRef.current?.();
-          return totalSec;
-        }
-        return next;
-      });
-    }, 1000);
+    const update = () => {
+      const elapsed = computeElapsed();
+      if (elapsed >= totalSec) {
+        accumSecRef.current   = totalSec;
+        startEpochRef.current = null;
+        setElapsedSec(totalSec);
+        setIsRunning(false);
+        setIsComplete(true);
+        persistRest({ isRunning: false, isComplete: true });
+        onCompleteRef.current?.();
+      } else {
+        setElapsedSec(Math.floor(elapsed));
+      }
+    };
 
-    return () => clearInterval(intervalRef.current);
-  }, [isRunning, totalSec]);
+    // Immediate correction — covers reload-resume and returning from a
+    // throttled background tab where setInterval barely fired.
+    update();
+    const id = setInterval(update, 1000);
+    const onVisibility = () => { if (!document.hidden) update(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRunning, totalSec, persistRest]);
 
   // ── Live history recording (every HISTORY_SAMPLE_SEC) ───────────────
   // Records actual probe core readings into liveHistory for the chart.

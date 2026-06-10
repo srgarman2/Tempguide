@@ -6,6 +6,7 @@ import useRestTimer from '../hooks/useRestTimer';
 import NavBar from './NavBar';
 import CarryoverChart from './CarryoverChart';
 import { buildLogEntry, saveLogEntry } from '../utils/cookLog';
+import { loadSession, updateSession } from '../utils/cookSession';
 
 export default function RestScreen({ selection, thermo, navigate, goBack, startOver, SCREENS, useCelsius }) {
   const category = getCategoryById(selection.categoryId);
@@ -153,6 +154,9 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   useEffect(() => {
     if (!timer.isComplete || logSavedRef.current) return;
     logSavedRef.current = true;
+    // A completed rest restored after a reload already wrote its log entry
+    // before the reload — the session flag prevents a duplicate.
+    if (loadSession()?.rest?.logSaved) return;
     const entry = buildLogEntry({
       selection,
       item,
@@ -167,6 +171,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
       ambientWasClamped,
     });
     saveLogEntry(entry);
+    updateSession({ rest: { ...(loadSession()?.rest ?? {}), logSaved: true } });
   }, [timer.isComplete]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unit = useCelsius ? 'C' : 'F';
