@@ -13,12 +13,14 @@ const STATE_LABEL = {
 export default function ThermoBar({ thermo, accentColor }) {
   const {
     state, coreTemp, deviceName, batteryOk, errorMsg,
-    gaugeAmbientTemp, connectedVia,
+    gaugeAmbientTemp, connectedVia, probeSerial,
     connect, disconnect,
   } = thermo;
   const isConnected   = state === THERMOMETER_STATE.CONNECTED;
   const isUnsupported = state === THERMOMETER_STATE.UNSUPPORTED;
-  const isGGG         = isConnected && connectedVia === 'node';
+  // Connected through a MeatNet repeater (Display, Booster, or Giant Grill
+  // Gauge) instead of directly to the probe — data is relayed over UART.
+  const isNode        = isConnected && connectedVia === 'node';
 
   const handleClick = () => {
     if (isConnected) {
@@ -42,14 +44,17 @@ export default function ThermoBar({ thermo, accentColor }) {
     <div
       className="thermo-bar"
       onClick={handleClick}
-      title={errorMsg ?? (isConnected ? 'Click to disconnect' : 'Click to connect')}
+      title={errorMsg
+        ?? (isConnected
+          ? `Click to disconnect${probeSerial ? ` · probe ${probeSerial}` : ''}`
+          : 'Click to connect')}
     >
       <div className={`thermo-dot ${dotClass}`} />
       <span className="thermo-label">
         {isConnected && deviceName
           ? deviceName
           : STATE_LABEL[state] ?? 'Thermometer'}
-        {isGGG && <span className="thermo-via-label"> · via GGG</span>}
+        {isNode && <span className="thermo-via-label"> · via MeatNet</span>}
         {!batteryOk && isConnected && ' · low battery'}
       </span>
 
@@ -60,8 +65,9 @@ export default function ThermoBar({ thermo, accentColor }) {
         </span>
       )}
 
-      {/* GGG grill ambient RTD — only shown when connected through a node */}
-      {isGGG && gaugeAmbientTemp != null && (
+      {/* GGG grill ambient RTD — only the Gauge sends 0x60, so this stays hidden
+          when relaying through a Display or Booster */}
+      {isNode && gaugeAmbientTemp != null && (
         <span className="thermo-grill-temp" title="Grill/smoker chamber temperature (GGG RTD sensor)">
           🌡 {gaugeAmbientTemp.toFixed(0)}°F
         </span>

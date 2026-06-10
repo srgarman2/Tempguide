@@ -11,7 +11,7 @@
  *   Device Status Char:    00000101-CAAB-3792-3D44-97AE51C1407A
  *   Notifications are raw Device Status bytes (no framing header).
  *
- * PATH B — MeatNet Node / Giant Grill Gauge (UART Service):
+ * PATH B — MeatNet Node (Display, Booster, Giant Grill Gauge) via UART Service:
  *   UART Service:  6E400001-B5A3-F393-E0A9-E50E24DCCA9E
  *   UART RX:       6E400002-B5A3-F393-E0A9-E50E24DCCA9E  (Write — send commands)
  *   UART TX:       6E400003-B5A3-F393-E0A9-E50E24DCCA9E  (Read/Notify — receive data)
@@ -19,18 +19,40 @@
  *   Message 0x45 (Probe Status) — relayed 8-sensor probe data.
  *   Message 0x60 (Gauge Status) — GGG's own RTD grill temperature.
  *
- * UART Response/Notification Frame (15-byte header):
- *   Bytes  0–1:  Sync { 0xCA, 0xFE }
- *   Bytes  2–3:  CRC-16-CCITT (poly 0x1021, init 0xFFFF) over bytes[4..end]
- *   Byte     4:  Message type | 0x80 (high bit = response/notification)
- *   Bytes  5–8:  Request ID
- *   Bytes 9–12:  Response ID
- *   Byte    13:  Success (1 = ok)
- *   Byte    14:  Payload length
- *   Bytes  15+:  Payload
+ *   MeatNet repeater nodes (the Display and Booster) re-broadcast probe data
+ *   over a longer range than the probe's tiny antenna can manage — connecting
+ *   to a node instead of the probe is the supported way to extend range.
+ *   Nodes send Probe Status notifications unsolicited once notifications are
+ *   enabled on UART TX; no subscription command is required.
  *
- * Probe Status (0x45) payload[4:] is byte-for-byte identical to the Device Status
- * Char layout, so parseDeviceStatus() is reused with a shifted DataView.
+ * UART frame headers (meatnet_node_ble_specification):
+ *
+ *   REQUEST framing (10-byte header) — node-ORIGINATED notifications.
+ *   Repeater nodes send Probe Status (0x45) this way (message-type high bit 0):
+ *     Bytes  0–1:  Sync { 0xCA, 0xFE }
+ *     Bytes  2–3:  CRC-16-CCITT (poly 0x1021, init 0xFFFF) over bytes[4..end]
+ *     Byte     4:  Message type (high bit = 0)
+ *     Bytes  5–8:  Request ID
+ *     Byte     9:  Payload length
+ *     Bytes  10+:  Payload
+ *
+ *   RESPONSE framing (15-byte header) — command replies, and the framing
+ *   observed on GGG status notifications (message-type high bit 1):
+ *     Bytes  0–1:  Sync { 0xCA, 0xFE }
+ *     Bytes  2–3:  CRC-16-CCITT over bytes[4..end]
+ *     Byte     4:  Message type | 0x80
+ *     Bytes  5–8:  Request ID
+ *     Bytes 9–12:  Response ID
+ *     Byte    13:  Success (1 = ok)
+ *     Byte    14:  Payload length
+ *     Bytes  15+:  Payload
+ *
+ * Probe Status (0x45) payload starts with the probe serial number, then bytes
+ * that are byte-for-byte identical to the Device Status Char layout, so
+ * parseDeviceStatus() is reused on the sliced remainder. The serial size
+ * differs by source:
+ *   request-framed (Display/Booster per MeatNet node spec): uint32 — 4 bytes
+ *   response-framed (observed on GGG firmware):             10 bytes
  *
  * Gauge Status (0x60) payload[16:18] = 13-bit RTD (0.1°C/step, range −20 to 799°C).
  *
@@ -125,30 +147,38 @@ function crc16ccitt(bytes) {
 }
 
 /**
- * Parse a UART response/notification frame from a MeatNet Node or Giant Grill Gauge.
+ * Parse a UART frame from a MeatNet node (Display, Booster, Giant Grill Gauge).
  *
- * Frame layout (15-byte header):
- *   [0-1]  Sync bytes { 0xCA, 0xFE }
- *   [2-3]  CRC-16-CCITT over bytes[4..end]
- *   [4]    Message type (bit 7 = 1 for responses/notifications)
- *   [5-8]  Request ID
- *   [9-12] Response ID
- *   [13]   Success flag
- *   [14]   Payload length
- *   [15+]  Payload
+ * Two framings exist (see file header): node-originated notifications use the
+ * 10-byte REQUEST header (high bit of message type = 0); command replies and
+ * GGG status notifications use the 15-byte RESPONSE header (high bit = 1).
+ *
+ * The high bit selects which framing to try first; a payload-length
+ * consistency check guards against firmware that deviates from the spec,
+ * falling back to the other framing when the indicated one doesn't fit.
  *
  * @param {Uint8Array} bytes
- * @returns {{ msgType: number, payload: Uint8Array, crcValid: boolean } | null}
+ * @returns {{ msgType: number, payload: Uint8Array, framing: 'request'|'response', crcValid: boolean } | null}
  */
 function parseUARTFrame(bytes) {
-  if (bytes.length < 15) return null;
+  if (bytes.length < 10) return null;
   if (bytes[0] !== 0xCA || bytes[1] !== 0xFE) return null;
 
   const msgType    = bytes[4] & 0x7F;   // strip high bit (response/notification marker)
-  const payloadLen = bytes[14];
-  if (bytes.length < 15 + payloadLen) return null;
+  const isResponse = !!(bytes[4] & 0x80);
 
-  const payload  = bytes.slice(15, 15 + payloadLen);
+  const tryFraming = (headerLen, lenIndex, framing) => {
+    if (bytes.length < headerLen) return null;
+    const payloadLen = bytes[lenIndex];
+    if (bytes.length < headerLen + payloadLen) return null;
+    return { payload: bytes.slice(headerLen, headerLen + payloadLen), framing };
+  };
+
+  const framed = isResponse
+    ? (tryFraming(15, 14, 'response') ?? tryFraming(10, 9, 'request'))
+    : (tryFraming(10, 9, 'request')   ?? tryFraming(15, 14, 'response'));
+  if (!framed) return null;
+
   const crcStored = (bytes[2] << 8) | bytes[3];
   const crcActual = crc16ccitt(bytes.slice(4));  // CRC covers bytes[4] to end of payload
   const crcValid  = crcStored === crcActual;
@@ -158,7 +188,7 @@ function parseUARTFrame(bytes) {
       'computed:', crcActual.toString(16), '— processing anyway');
   }
 
-  return { msgType, payload, crcValid };
+  return { msgType, payload: framed.payload, framing: framed.framing, crcValid };
 }
 
 /**
@@ -298,12 +328,14 @@ export default function useThermometer() {
   const [errorMsg, setErrorMsg]         = useState(null);
   const [gaugeAmbientTemp, setGaugeAmbientTemp] = useState(null); // GGG RTD grill temp (°F)
   const [connectedVia, setConnectedVia] = useState(null);         // 'probe' | 'node' | null
+  const [probeSerial, setProbeSerial]   = useState(null);         // hex serial of the relayed probe (node path)
 
   const deviceRef           = useRef(null);
   const serverRef           = useRef(null);
   const charRef             = useRef(null);
   const rxCharRef           = useRef(null);    // UART RX — for sending commands to node/GGG
   const isNodeConnectionRef = useRef(false);   // true when connected via UART (node/GGG path)
+  const lockedSerialRef     = useRef(null);    // first probe serial heard — a node can repeat up to 4 probes
 
   // Web Bluetooth availability check
   const isSupported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
@@ -322,10 +354,12 @@ export default function useThermometer() {
     setBatteryOk(true);         // reset — stale false from a previous session would persist otherwise
     setGaugeAmbientTemp(null);
     setConnectedVia(null);
+    setProbeSerial(null);
     charRef.current           = null;
     rxCharRef.current         = null;
     serverRef.current         = null;
     isNodeConnectionRef.current = false;
+    lockedSerialRef.current   = null;
   }, []);
 
   /**
@@ -390,21 +424,38 @@ export default function useThermometer() {
         }
 
         if (frame.msgType === MSG_PROBE_STATUS) {
-          // Probe Status (0x45): payload[0-9] = probe serial (10 bytes, matching Gauge Status
-          // serial format), payload[10:] = Device Status layout (identical to direct-probe char).
+          // Probe Status (0x45): payload = probe serial + Device Status layout
+          // (identical to the direct-probe characteristic). The serial size
+          // depends on the source:
+          //   request-framed (Display/Booster, MeatNet node spec): uint32 — 4 bytes
+          //   response-framed (observed on GGG firmware):          10 bytes
           //
-          // Minimum: serial(10) + log(8) + temp(13) + mode(1) + battery(1) = 33 bytes.
+          // Minimum after serial: log(8) + temp(13) + mode(1) + battery(1) = 23 bytes.
           // Prediction bytes (7) may or may not be present in relay — treat as optional.
-          //
-          // IMPORTANT: use .slice(10) not a shifted DataView — parseDeviceStatus does
-          // `new Uint8Array(dataView.buffer)` which ignores byteOffset entirely.
-          // slice() creates a new ArrayBuffer at byteOffset=0 so indexing is correct.
-          if (frame.payload.length < 33) {
+          const serialLen = frame.framing === 'request' ? 4 : 10;
+          if (frame.payload.length < serialLen + 23) {
             console.warn('[useThermometer] Probe Status (0x45) payload too short:',
-              frame.payload.length, '— expected ≥33 bytes (serial(10)+log(8)+temp(13)+mode(1)+battery(1))');
+              frame.payload.length, '— expected ≥' + (serialLen + 23) +
+              ' bytes (serial(' + serialLen + ')+log(8)+temp(13)+mode(1)+battery(1))');
             return;
           }
-          const probeStatusBytes = frame.payload.slice(10);
+
+          // A node can repeat up to 4 probes simultaneously. Lock onto the first
+          // serial heard and drop frames from other probes so two probes' data
+          // doesn't interleave into one reading stream. Disconnect resets the lock.
+          const serialHex = Array.from(frame.payload.slice(0, serialLen),
+            b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+          if (lockedSerialRef.current == null) {
+            lockedSerialRef.current = serialHex;
+            setProbeSerial(serialHex);
+          } else if (lockedSerialRef.current !== serialHex) {
+            return;
+          }
+
+          // IMPORTANT: use .slice() not a shifted DataView — parseDeviceStatus does
+          // `new Uint8Array(dataView.buffer)` which ignores byteOffset entirely.
+          // slice() creates a new ArrayBuffer at byteOffset=0 so indexing is correct.
+          const probeStatusBytes = frame.payload.slice(serialLen);
           applyDeviceStatus(parseDeviceStatus(new DataView(probeStatusBytes.buffer)));
 
         } else if (frame.msgType === MSG_GAUGE_STATUS) {
@@ -433,6 +484,8 @@ export default function useThermometer() {
     try {
       setState(THERMOMETER_STATE.SCANNING);
       setErrorMsg(null);
+      lockedSerialRef.current = null;   // fresh session — re-lock onto whichever probe speaks first
+      setProbeSerial(null);
 
       // Request the Combustion device
       const device = await navigator.bluetooth.requestDevice({
@@ -512,6 +565,7 @@ export default function useThermometer() {
     charRef.current             = null;
     rxCharRef.current           = null;
     isNodeConnectionRef.current = false;
+    lockedSerialRef.current     = null;
     setState(THERMOMETER_STATE.IDLE);
     setSensors(null);
     setCoreTemp(null);
@@ -521,6 +575,7 @@ export default function useThermometer() {
     setBatteryOk(true);         // reset on clean disconnect too
     setGaugeAmbientTemp(null);
     setConnectedVia(null);
+    setProbeSerial(null);
   }, [handleNotification, onDisconnect]);
 
   // Cleanup on unmount
@@ -541,6 +596,7 @@ export default function useThermometer() {
     isInstantRead,        // true when probe is in Instant Read (single-sensor) mode
     gaugeAmbientTemp,     // number | null — GGG platinum RTD grill temperature (°F), null when direct probe
     connectedVia,         // 'probe' | 'node' | null — which BLE path was used
+    probeSerial,          // string | null — hex serial of the relayed probe (node path only)
     deviceName,
     batteryOk,
     errorMsg,
