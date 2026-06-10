@@ -242,6 +242,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           endTemp={rawEndTemp}
           accentColor={category.accentColor}
           donenessColor={doneness?.color}
+          useCelsius={useCelsius}
         />
       </div>
 
@@ -389,16 +390,18 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               {displayPullTemp ? displayTemp(displayPullTemp, useCelsius) : '—'}
             </span>
           </div>
-          {method.id !== 'sous-vide' && (
+          {method.appliesCarryover && (
             <div className="carryover-row">
               <span className="label">
                 {displayTemp(displayPullTemp, useCelsius)} {displayDeltaF(co.deltaF, useCelsius)} carryover = {endTempDisplay}
               </span>
             </div>
           )}
-          {method.id === 'sous-vide' && (
+          {!method.appliesCarryover && (
             <div className="carryover-row">
-              <span className="label">Bath temperature = target</span>
+              <span className="label">
+                {method.id === 'sous-vide' ? 'Bath temperature = target' : (method.noCarryoverLabel ?? 'Surface cools instantly')}
+              </span>
               <span className="val">No carryover</span>
             </div>
           )}
@@ -412,7 +415,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
         </div>
 
         {/* Carryover details */}
-        {method.id !== 'sous-vide' && (
+        {method.appliesCarryover && (
           <div className="cook-card">
             <div className="cook-card-header">
               <span className="cook-card-title">Carryover Physics</span>
@@ -499,7 +502,7 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               </span>
               <span className="val">
                 {pullNowPreview.surfaceSource === 'finite-diff'
-                  ? `${displayTemp(pullNowPreview.preview.surfaceGradientF, useCelsius)} (${pullNowPreview.liveGradient?.length}-sensor FD)`
+                  ? `${displayDeltaF(pullNowPreview.preview.surfaceGradientF, useCelsius)} (${pullNowPreview.liveGradient?.length}-sensor FD)`
                   : pullNowPreview.liveSurfaceTemp != null
                     ? `${displayTemp(pullNowPreview.liveSurfaceTemp, useCelsius)} (probe)`
                     : `${displayTemp(pullNowPreview.preview.surfaceTempAtPull, useCelsius)} (est.)`
@@ -600,12 +603,11 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
           <div className="cook-card-header">
             <span className="cook-card-title">Rest Time</span>
             <span className="cook-card-value">
-              {Array.isArray(item.restRangeMinutes)
-                ? `${item.restRangeMinutes[0]}–${item.restRangeMinutes[1]} min`
-                : restMinutes === 0
-                  ? 'Serve immediately'
-                  : `${restMinutes} min`
-              }
+              {(() => {
+                const range = doneness?.restRangeMinutes ?? item.restRangeMinutes;
+                if (Array.isArray(range)) return `${range[0]}–${range[1]} min`;
+                return restMinutes === 0 ? 'Serve immediately' : `${restMinutes} min`;
+              })()}
             </span>
           </div>
           <p style={{ fontSize: 12, color: 'rgba(240,240,240,0.5)' }}>

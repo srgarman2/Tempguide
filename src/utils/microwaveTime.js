@@ -36,6 +36,7 @@ const REF_DELTA_F = 100;
 const BASE_FACTOR = {
   beef:    2.8,
   pork:    2.5,
+  lamb:    2.7,
   poultry: 2.2,
   seafood: 1.8,
   potato:  3.5,

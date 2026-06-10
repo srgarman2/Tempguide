@@ -3,6 +3,8 @@
  * Displays current temp vs pull target with a radial arc.
  */
 
+import { fToC } from '../utils/carryover';
+
 const SIZE = 220;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
@@ -33,6 +35,7 @@ export default function TempGauge({
   endTemp,
   accentColor = '#c41e3a',
   donenessColor,
+  useCelsius = false,
 }) {
   // Temperature range to display: floor at pullTemp - 80, ceiling at pullTemp + 20
   const low  = (pullTemp ?? 100) - 80;
@@ -122,7 +125,7 @@ export default function TempGauge({
               fontWeight="700"
               fontFamily="Inter, system-ui, sans-serif"
             >
-              {Math.round(pullTemp)}°
+              {Math.round(useCelsius ? fToC(pullTemp) : pullTemp)}°
             </text>
           );
         })()}
@@ -152,15 +155,15 @@ export default function TempGauge({
               className={`gauge-temp ${atPull ? '--connected' : '--manual'}`}
               style={{ color: hasTemp ? (atPull ? '#4cde80' : progressColor) : undefined }}
             >
-              {currentTemp.toFixed(1)}
+              {(useCelsius ? fToC(currentTemp) : currentTemp).toFixed(1)}
             </div>
-            <div className="gauge-unit">°F</div>
+            <div className="gauge-unit">{useCelsius ? '°C' : '°F'}</div>
             <div className="gauge-label">{atPull ? 'Pull now!' : 'current'}</div>
           </>
         ) : (
           <>
             <div className="gauge-temp --waiting">—</div>
-            <div className="gauge-unit">°F</div>
+            <div className="gauge-unit">{useCelsius ? '°C' : '°F'}</div>
             <div className="gauge-label">no probe</div>
           </>
         )}

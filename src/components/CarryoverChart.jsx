@@ -243,7 +243,7 @@ export default function CarryoverChart({
         {/* Peak label */}
         {peakTempF > pullTempF + 2 && (
           <text
-            x={xScale(visibleProfile.findIndex(p => p.tempF >= peakTempF - 0.5))}
+            x={xScale(visibleProfile.find(p => p.tempF >= peakTempF - 0.5)?.minute ?? 0)}
             y={peakY - 8}
             textAnchor="middle"
             fill={accentColor}

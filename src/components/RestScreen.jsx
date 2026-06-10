@@ -40,10 +40,12 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   })() ?? 135;
 
   const restMinutes = isBasting
-    ? (doneness?.bastingRestMinutes ?? item.restMinutes ?? 10)
-    : (Array.isArray(item.restRangeMinutes)
-        ? item.restRangeMinutes[0]
-        : (item.restMinutes ?? 10));
+    ? (doneness?.bastingRestMinutes ?? doneness?.restMinutes ?? item.restMinutes ?? 10)
+    : (doneness?.restMinutes
+        ?? (Array.isArray(doneness?.restRangeMinutes) ? doneness.restRangeMinutes[0] : null)
+        ?? (Array.isArray(item.restRangeMinutes) ? item.restRangeMinutes[0] : null)
+        ?? item.restMinutes
+        ?? 10);
 
   const hasMeasuredData = selection.actualCoreTempF != null && selection.actualSurfaceTempF != null;
 
@@ -195,8 +197,8 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   const thicknessDisplay = displayThickness(selection.thicknessInches ?? 1.0, useCelsius);
 
   const categoryLabel = {
-    beef: 'Mammalian', pork: 'Mammalian', poultry: 'Avian',
-    seafood: 'Seafood', baked: 'Baked',
+    beef: 'Mammalian', pork: 'Mammalian', lamb: 'Mammalian', poultry: 'Avian',
+    seafood: 'Seafood', baked: 'Baked', potato: 'Starch',
   }[selection.categoryId] || selection.categoryId;
 
   return (
@@ -508,7 +510,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
               : hasMeasuredData
                 ? '🌡 T_surface − T_core (probe)'
                 : 'ΔT surface→core (model)'}
-            value={displayTemp(carryover.surfaceGradientF, useCelsius)}
+            value={displayDeltaF(carryover.surfaceGradientF, useCelsius)}
             detail={`Surface ${displayTemp(carryover.surfaceTempAtPull, useCelsius)} → Core ${displayTemp(timer.adjustedPullTempF, useCelsius)} at pull`}
           />
           <PhysicsParam
@@ -578,7 +580,7 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
                 ΔT = gradient × (1 − θ*) × penetration
               </div>
               <div className="physics-formula-eq" style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                {displayTemp(carryover.surfaceGradientF, useCelsius)} × {carryover.fractionReached} × {carryover.penetrationFactor?.toFixed(3)} = <span style={{ color: '#f5a623' }}>{displayDeltaF(carryover.deltaF, useCelsius)}</span>
+                {displayDeltaF(carryover.surfaceGradientF, useCelsius)} × {carryover.fractionReached} × {carryover.penetrationFactor?.toFixed(3)} = <span style={{ color: '#f5a623' }}>{displayDeltaF(carryover.deltaF, useCelsius)}</span>
               </div>
             </>
           )}

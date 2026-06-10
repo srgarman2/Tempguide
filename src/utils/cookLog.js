@@ -103,7 +103,7 @@ export function buildLogEntry({
     categoryLabel: category?.label ?? selection.categoryId,
     itemId:        selection.itemId,
     itemLabel:     item?.label ?? selection.itemId,
-    donenessLabel: doneness?.label ?? null,
+    donenessLabel: doneness?.level ?? null,
     methodId:      selection.methodId,
     methodLabel:   method?.label ?? selection.methodId,
 

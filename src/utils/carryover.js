@@ -340,8 +340,10 @@ const BONE_IN_DEFAULT = 0.85;  // Standard: bone insulates one face → ~15% red
  *   - basting-flip: butter temp is ~320°F regardless of steak thickness
  *   - boil: water is 212°F regardless of potato size (carryover is 0 anyway)
  *   - sous-vide: bath temp is uniform (already handled by early return)
+ *   - poach/steam/braise: liquid or condensing steam caps the surface temp
+ *     independent of thickness — same physics as boil
  */
-const SUPPRESS_THICKNESS_SCALE = new Set(['basting-flip', 'boil', 'sous-vide', 'jeff-special']);
+const SUPPRESS_THICKNESS_SCALE = new Set(['basting-flip', 'boil', 'sous-vide', 'jeff-special', 'poach', 'steam', 'braise']);
 
 /**
  * Geometry definitions with strict characteristic lengths.
@@ -447,6 +449,11 @@ function estimateSurfaceTempAtPull(methodId, pullTempF) {
   //   sous-vide    → ~1–2°F  (bath = target, just plating heat)
   const surfaceExcessF = {
     'boil':            0,   // 212°F water cools surface on removal — no inward gradient
+    'poach':           4,   // 160–180°F liquid barely above target — minimal gradient
+    'braise':          6,   // Surface capped near liquid temp; hours-long cook → near-uniform profile
+    'steam':           8,   // Saturated 212°F steam; condensation caps the surface temperature
+    'broil':          42,   // Top-down radiant ~550°F — steep one-sided gradient like grill-high
+    'deep-fry':       35,   // 350–375°F oil: very high h, but the hot crust layer is thin
     'sous-vide':       3,   // Bath ≈ target, virtually no gradient
     'low-slow':       16,   // Long cook at 225–275°F → near-uniform profile
     'smoker':         18,   // Like low-slow with slight bark heat retention
@@ -772,8 +779,10 @@ export function estimateCarryover({
 
   const rawCarryover = surfaceGradient * fractionReached * penetrationFactor;
 
-  // Clamp to sensible range: 0.5–25°F
-  const deltaF = Math.max(0.5, Math.min(25, rawCarryover));
+  // Clamp to sensible range: 0.5–25°F. Methods with no inward gradient at pull
+  // (e.g. boil — the water-capped surface cools instantly on draining) produce
+  // exactly zero carryover, not the 0.5°F floor.
+  const deltaF = rawCarryover <= 0 ? 0 : Math.max(0.5, Math.min(25, rawCarryover));
   const peakTempF = pullTempF + deltaF;
 
   // Build temperature profile over rest period

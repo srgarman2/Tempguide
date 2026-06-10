@@ -84,7 +84,7 @@ export default function CookingMethodScreen({ selection, navigate, goBack, SCREE
     navigate(SCREENS.COOK, { methodId, thicknessInches: thickness, geometry, boneIn, isWrapped });
   };
 
-  const showGeometrySelector = !item.hasBoneInOption && (selection.categoryId === 'beef' || selection.categoryId === 'pork');
+  const showGeometrySelector = !item.hasBoneInOption && ['beef', 'pork', 'lamb'].includes(selection.categoryId);
 
   return (
     <div className="screen method-screen" style={{ '--accent': category.accentColor }}>
