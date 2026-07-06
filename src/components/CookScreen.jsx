@@ -1,9 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover, formatTemp, getCookStatus, displayTemp, displayDeltaF, formatTempDisplay, displayThickness, fToC, cToF } from '../utils/carryover';
 import { estimateMicrowaveTime } from '../utils/microwaveTime';
+import { alertsEnabled, setAlertsEnabled, enableAlerts, alert as fireAlert } from '../utils/alerts';
 import { THERMOMETER_STATE } from '../constants/thermometer';
 import useCookHistory from '../hooks/useCookHistory';
+import useWakeLock from '../hooks/useWakeLock';
 import NavBar from './NavBar';
 import TempGauge from './TempGauge';
 import ThermoBar from './ThermoBar';
@@ -16,6 +18,11 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
   const [editingTarget, setEditingTarget] = useState(false);
   const [targetInputVal, setTargetInputVal] = useState('');
 
+  // Alerts preference — enabling requires a user gesture (audio unlock + permission)
+  const [alertsOn, setAlertsOn] = useState(() => alertsEnabled());
+  const nearAlertFiredRef = useRef(false);
+  const pullAlertFiredRef = useRef(false);
+
   // Hooks must be called before any early return (React rules of hooks).
   // Compute temp values inline so useCookHistory is always called.
   const isConnected = thermo.state === THERMOMETER_STATE.CONNECTED;
@@ -23,6 +30,9 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
     ? thermo.coreTemp
     : (manualTemp !== '' ? (useCelsius ? cToF(parseFloat(manualTemp)) : parseFloat(manualTemp)) : null);
   const cookHistory = useCookHistory(currentTemp, isConnected ? thermo.surfaceTemp : null);
+
+  // Keep the screen awake while a cook is on this screen
+  useWakeLock(true);
 
   const category = getCategoryById(selection.categoryId);
   const item = getItemById(selection.categoryId, selection.itemId);
@@ -136,6 +146,34 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
   const status = getCookStatus(currentTemp, displayPullTemp, effectiveEndTemp);
   const shouldPull = currentTemp !== null && currentTemp >= displayPullTemp;
 
+  // ── Alert triggers ──────────────────────────────────────────────────────
+  // Each fires once per cook: a heads-up ~5°F out, then the pull alarm.
+  // Works with probe data and manual entry alike. Notifications reach the
+  // OS even when this tab is hidden — the point for a far-away laptop.
+  useEffect(() => {
+    if (!alertsOn || currentTemp == null || displayPullTemp == null) return;
+    if (!pullAlertFiredRef.current && currentTemp >= displayPullTemp) {
+      pullAlertFiredRef.current = true;
+      nearAlertFiredRef.current = true;   // skip the redundant heads-up
+      fireAlert('pull', '🚨 Pull now!',
+        `${item.label} hit ${displayTemp(currentTemp, useCelsius)} — carryover will finish it at ${endTempDisplay}.`);
+    } else if (!nearAlertFiredRef.current && currentTemp >= displayPullTemp - 5) {
+      nearAlertFiredRef.current = true;
+      fireAlert('near', '⚡ Almost there',
+        `${item.label} is within ${useCelsius ? '3°C' : '5°F'} of pull temp (${displayTemp(displayPullTemp, useCelsius)}).`);
+    }
+  }, [alertsOn, currentTemp, displayPullTemp, item.label, useCelsius, endTempDisplay]);
+
+  const toggleAlerts = async () => {
+    if (alertsOn) {
+      setAlertsEnabled(false);
+      setAlertsOn(false);
+    } else {
+      await enableAlerts();   // user gesture: unlocks audio + asks notification permission
+      setAlertsOn(true);
+    }
+  };
+
   // ── "If pulled now" live preview ────────────────────────────────────────
   // Recalculates carryover using current temp as the hypothetical pull temp.
   // When probe is connected in Normal mode, uses the full T_core→T_surface gradient
@@ -231,6 +269,28 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
 
       {/* Thermometer connection bar */}
       <ThermoBar thermo={thermo} accentColor={category.accentColor} />
+
+      {/* Alerts toggle — sound + browser notification at pull temp */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '8px 20px 0' }}>
+        <button
+          onClick={toggleAlerts}
+          title={alertsOn
+            ? 'Alerts on: sound + notification near and at pull temp. Click to disable.'
+            : 'Enable a sound and browser notification when it\'s time to pull.'}
+          style={{
+            background: alertsOn ? 'rgba(76,222,128,0.12)' : 'rgba(255,255,255,0.06)',
+            border: `1px solid ${alertsOn ? 'rgba(76,222,128,0.35)' : 'rgba(255,255,255,0.14)'}`,
+            borderRadius: 20,
+            color: alertsOn ? '#4cde80' : 'rgba(240,240,240,0.6)',
+            cursor: 'pointer',
+            fontSize: 12,
+            fontWeight: 600,
+            padding: '4px 12px',
+          }}
+        >
+          {alertsOn ? '🔔 Alerts on' : '🔕 Alerts off'}
+        </button>
+      </div>
 
       <div style={{ height: 12 }} />
 

@@ -2,7 +2,9 @@ import { useMemo, useEffect, useRef } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover, displayTemp, displayDeltaF, displayThickness, fToC } from '../utils/carryover';
 import { THERMOMETER_STATE } from '../constants/thermometer';
+import { alertsEnabled, alert as fireAlert } from '../utils/alerts';
 import useRestTimer from '../hooks/useRestTimer';
+import useWakeLock from '../hooks/useWakeLock';
 import NavBar from './NavBar';
 import CarryoverChart from './CarryoverChart';
 import { buildLogEntry, saveLogEntry } from '../utils/cookLog';
@@ -148,6 +150,34 @@ export default function RestScreen({ selection, thermo, navigate, goBack, startO
   });
 
   const { carryover } = timer;
+
+  // Keep the screen awake while resting — the timer is the whole point here
+  useWakeLock(true);
+
+  // ── Alerts: target reached mid-rest, and rest complete ───────────────
+  // wasCompleteAtMount guards the restored-after-reload case: a rest that
+  // finished before the reload shouldn't chime again on load.
+  const wasCompleteAtMountRef = useRef(timer.isComplete);
+  const targetAlertFiredRef   = useRef(false);
+  const doneAlertFiredRef     = useRef(false);
+
+  useEffect(() => {
+    if (!timer.isRunning || targetAlertFiredRef.current || !alertsEnabled()) return;
+    if (timer.hasReachedTarget) {
+      targetAlertFiredRef.current = true;
+      fireAlert('near', '🎯 Target reached',
+        `${item.label} hit ${displayTemp(endTempF, useCelsius)} — you can slice now, or let it finish resting.`);
+    }
+  }, [timer.isRunning, timer.hasReachedTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!timer.isComplete || doneAlertFiredRef.current || wasCompleteAtMountRef.current) return;
+    doneAlertFiredRef.current = true;
+    if (alertsEnabled()) {
+      fireAlert('done', '✅ Rest complete — time to eat!',
+        `${item.label} peaked at ~${displayTemp(carryover.peakTempF, useCelsius)}.`);
+    }
+  }, [timer.isComplete]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auto-save log entry when rest completes ──────────────────────────
   const logSavedRef = useRef(false);
