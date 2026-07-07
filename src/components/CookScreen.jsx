@@ -501,6 +501,36 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <span className="val">{displayTemp(thermo.predictedCoreTemp, useCelsius)}</span>
             </div>
           )}
+          {isConnected && thermo.canSendTarget && displayPullTemp != null && (() => {
+            const synced = thermo.targetSync === 'ok' && thermo.lastSentTargetF === displayPullTemp;
+            return (
+              <div className="carryover-row" style={{ alignItems: 'center' }}>
+                <span className="label">
+                  Probe prediction target{thermo.connectedVia === 'node' ? ' (via MeatNet)' : ''}
+                </span>
+                <button
+                  onClick={() => thermo.sendTargetToProbe(displayPullTemp)}
+                  disabled={thermo.targetSync === 'sending' || synced}
+                  title="Set this pull temp as the probe's prediction set point — the Combustion Display will count down to the same target"
+                  style={{
+                    background: synced ? 'rgba(76,222,128,0.12)' : 'rgba(255,255,255,0.07)',
+                    border: `1px solid ${synced ? 'rgba(76,222,128,0.35)' : 'rgba(255,255,255,0.18)'}`,
+                    borderRadius: 8,
+                    color: synced ? '#4cde80' : 'var(--text-primary)',
+                    cursor: synced ? 'default' : 'pointer',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: '3px 10px',
+                  }}
+                >
+                  {thermo.targetSync === 'sending' ? 'Sending…'
+                    : synced ? `✓ ${displayTemp(displayPullTemp, useCelsius)} set`
+                    : thermo.targetSync === 'fail' ? '⟳ Retry send'
+                    : `📡 Send ${displayTemp(displayPullTemp, useCelsius)}`}
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Carryover details */}

@@ -86,8 +86,12 @@ const UART_RX_CHAR            = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 const UART_TX_CHAR            = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 
 // UART message type IDs (strip high bit 0x80 before comparing)
-const MSG_PROBE_STATUS = 0x45;  // GGG relays probe data: 8-sensor gradient + virtual IDs
-const MSG_GAUGE_STATUS = 0x60;  // GGG's own RTD ambient grill temperature
+const MSG_SET_PREDICTION = 0x05;  // Set the probe's prediction target (pull temp)
+const MSG_PROBE_STATUS   = 0x45;  // Node relays probe data: 8-sensor gradient + virtual IDs
+const MSG_GAUGE_STATUS   = 0x60;  // GGG's own RTD ambient grill temperature
+
+/** Prediction modes (probe + node spec): 0=None, 1=Time to Removal, 2=Removal & Resting */
+const PREDICTION_MODE_TIME_TO_REMOVAL = 1;
 
 const NUM_SENSORS = 8;
 
@@ -158,9 +162,10 @@ function crc16ccitt(bytes) {
  * falling back to the other framing when the indicated one doesn't fit.
  *
  * @param {Uint8Array} bytes
- * @returns {{ msgType: number, payload: Uint8Array, framing: 'request'|'response', crcValid: boolean } | null}
+ * @returns {{ msgType: number, payload: Uint8Array, framing: 'request'|'response',
+ *             success: boolean|null, crcValid: boolean } | null}
  */
-function parseUARTFrame(bytes) {
+export function parseUARTFrame(bytes) {
   if (bytes.length < 10) return null;
   if (bytes[0] !== 0xCA || bytes[1] !== 0xFE) return null;
 
@@ -171,7 +176,11 @@ function parseUARTFrame(bytes) {
     if (bytes.length < headerLen) return null;
     const payloadLen = bytes[lenIndex];
     if (bytes.length < headerLen + payloadLen) return null;
-    return { payload: bytes.slice(headerLen, headerLen + payloadLen), framing };
+    return {
+      payload: bytes.slice(headerLen, headerLen + payloadLen),
+      framing,
+      success: framing === 'response' ? bytes[13] === 1 : null,
+    };
   };
 
   const framed = isResponse
@@ -179,16 +188,74 @@ function parseUARTFrame(bytes) {
     : (tryFraming(10, 9, 'request')   ?? tryFraming(15, 14, 'response'));
   if (!framed) return null;
 
-  const crcStored = (bytes[2] << 8) | bytes[3];
+  // CRC is little-endian on the wire (Combustion SDK memcpys the uint16 on
+  // LE hardware). Accept big-endian too — early GGG firmware observations
+  // were ambiguous, and a byte-swapped-but-correct CRC is still integrity.
+  const crcLE = bytes[2] | (bytes[3] << 8);
+  const crcBE = (bytes[2] << 8) | bytes[3];
   const crcActual = crc16ccitt(bytes.slice(4));  // CRC covers bytes[4] to end of payload
-  const crcValid  = crcStored === crcActual;
+  const crcValid  = crcLE === crcActual || crcBE === crcActual;
 
   if (!crcValid) {
-    console.warn('[useThermometer] UART CRC mismatch — stored:', crcStored.toString(16),
+    console.warn('[useThermometer] UART CRC mismatch — stored:', crcLE.toString(16),
       'computed:', crcActual.toString(16), '— processing anyway');
   }
 
-  return { msgType, payload: framed.payload, framing: framed.framing, crcValid };
+  return { msgType, payload: framed.payload, framing: framed.framing, success: framed.success, crcValid };
+}
+
+// ── UART command builders ────────────────────────────────────────────────────
+
+/**
+ * Build a direct-probe UART request — 6-byte header per probe_ble_specification:
+ *   [0-1] sync 0xCA 0xFE   [2-3] CRC (LE) over bytes[4..end]
+ *   [4] message type   [5] payload length   [6+] payload
+ */
+export function buildProbeRequest(msgType, payload) {
+  const buf = new Uint8Array(6 + payload.length);
+  buf[0] = 0xCA; buf[1] = 0xFE;
+  buf[4] = msgType;
+  buf[5] = payload.length;
+  buf.set(payload, 6);
+  const crc = crc16ccitt(buf.slice(4));
+  buf[2] = crc & 0xFF;          // little-endian, matching the Combustion SDK
+  buf[3] = (crc >> 8) & 0xFF;
+  return buf;
+}
+
+/**
+ * Build a MeatNet node UART request — 10-byte header per
+ * meatnet_node_ble_specification (adds a random 4-byte request ID):
+ *   [0-1] sync   [2-3] CRC (LE) over bytes[4..end]
+ *   [4] message type   [5-8] request ID   [9] payload length   [10+] payload
+ */
+export function buildNodeRequest(msgType, payload) {
+  const buf = new Uint8Array(10 + payload.length);
+  buf[0] = 0xCA; buf[1] = 0xFE;
+  buf[4] = msgType;
+  for (let i = 5; i <= 8; i++) buf[i] = Math.floor(Math.random() * 256);
+  buf[9] = payload.length;
+  buf.set(payload, 10);
+  const crc = crc16ccitt(buf.slice(4));
+  buf[2] = crc & 0xFF;
+  buf[3] = (crc >> 8) & 0xFF;
+  return buf;
+}
+
+/**
+ * Encode the 2-byte Set Prediction data field (identical for probe and node):
+ *   bits [9:0]  — set point, 0.1°C steps (0–102.3°C)
+ *   bits [11:10] — prediction mode (1 = Time to Removal)
+ * Returned little-endian, ready to append to a payload.
+ *
+ * @param {number} targetF - Pull temperature in °F
+ * @returns {[number, number]} [lowByte, highByte]
+ */
+export function encodePredictionData(targetF) {
+  const tempC = Math.min(102.3, Math.max(0, (targetF - 32) * 5 / 9));
+  const raw = Math.round(tempC * 10) & 0x3FF;
+  const packed = raw | (PREDICTION_MODE_TIME_TO_REMOVAL << 10);
+  return [packed & 0xFF, (packed >> 8) & 0xFF];
 }
 
 /**
@@ -329,13 +396,17 @@ export default function useThermometer() {
   const [gaugeAmbientTemp, setGaugeAmbientTemp] = useState(null); // GGG RTD grill temp (°F)
   const [connectedVia, setConnectedVia] = useState(null);         // 'probe' | 'node' | null
   const [probeSerial, setProbeSerial]   = useState(null);         // hex serial of the relayed probe (node path)
+  const [targetSync, setTargetSync]     = useState('idle');       // 'idle' | 'sending' | 'ok' | 'fail'
+  const [lastSentTargetF, setLastSentTargetF] = useState(null);   // last pull temp written to the probe
 
   const deviceRef           = useRef(null);
   const serverRef           = useRef(null);
   const charRef             = useRef(null);
-  const rxCharRef           = useRef(null);    // UART RX — for sending commands to node/GGG
+  const rxCharRef           = useRef(null);    // UART RX — for sending commands (probe or node)
   const isNodeConnectionRef = useRef(false);   // true when connected via UART (node/GGG path)
   const lockedSerialRef     = useRef(null);    // first probe serial heard — a node can repeat up to 4 probes
+  const lockedSerialBytesRef = useRef(null);   // raw serial bytes — echoed back in node commands
+  const syncTimeoutRef      = useRef(null);    // Set Prediction response timeout
 
   // Web Bluetooth availability check
   const isSupported = typeof navigator !== 'undefined' && !!navigator.bluetooth;
@@ -355,11 +426,15 @@ export default function useThermometer() {
     setGaugeAmbientTemp(null);
     setConnectedVia(null);
     setProbeSerial(null);
+    setTargetSync('idle');
+    setLastSentTargetF(null);
+    clearTimeout(syncTimeoutRef.current);
     charRef.current           = null;
     rxCharRef.current         = null;
     serverRef.current         = null;
     isNodeConnectionRef.current = false;
     lockedSerialRef.current   = null;
+    lockedSerialBytesRef.current = null;
   }, []);
 
   /**
@@ -447,6 +522,9 @@ export default function useThermometer() {
             b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
           if (lockedSerialRef.current == null) {
             lockedSerialRef.current = serialHex;
+            // Raw bytes are echoed back in node commands (Set Prediction needs
+            // the uint32 serial — only available on the 4-byte request framing)
+            lockedSerialBytesRef.current = serialLen === 4 ? frame.payload.slice(0, 4) : null;
             setProbeSerial(serialHex);
           } else if (lockedSerialRef.current !== serialHex) {
             return;
@@ -462,6 +540,11 @@ export default function useThermometer() {
           // Gauge Status (0x60): GGG's own platinum RTD reading
           const { gaugeTempF } = parseGaugeStatusPayload(frame.payload);
           if (gaugeTempF !== null) setGaugeAmbientTemp(gaugeTempF);
+
+        } else if (frame.msgType === MSG_SET_PREDICTION && frame.framing === 'response') {
+          // Confirmation for our Set Prediction command (node path)
+          clearTimeout(syncTimeoutRef.current);
+          setTargetSync(frame.success === false ? 'fail' : 'ok');
         }
         // Other message types (heartbeats, network topology, etc.) are silently ignored
 
@@ -485,7 +568,10 @@ export default function useThermometer() {
       setState(THERMOMETER_STATE.SCANNING);
       setErrorMsg(null);
       lockedSerialRef.current = null;   // fresh session — re-lock onto whichever probe speaks first
+      lockedSerialBytesRef.current = null;
       setProbeSerial(null);
+      setTargetSync('idle');
+      setLastSentTargetF(null);
 
       // Request the Combustion device
       const device = await navigator.bluetooth.requestDevice({
@@ -515,6 +601,14 @@ export default function useThermometer() {
         char = await service.getCharacteristic(DEVICE_STATUS_CHAR);
         isNodeConnectionRef.current = false;
         setConnectedVia('probe');
+        // The probe also exposes the UART service — grab RX so we can send
+        // commands (Set Prediction) on the direct path too. Non-fatal if absent.
+        try {
+          const uartService = await server.getPrimaryService(UART_SERVICE);
+          rxCharRef.current = await uartService.getCharacteristic(UART_RX_CHAR);
+        } catch {
+          rxCharRef.current = null;
+        }
       } catch {
         // Fall back to UART service — this is the path for GGG / MeatNet Nodes
         try {
@@ -549,6 +643,65 @@ export default function useThermometer() {
     }
   }, [isSupported, handleNotification, onDisconnect]);
 
+  /**
+   * Write the pull temperature to the probe as its prediction set point
+   * (Set Prediction 0x05, mode = Time to Removal). The probe's native
+   * prediction engine — and any Combustion Display on the MeatNet — then
+   * counts down to the same target this app computed.
+   *
+   * Direct probe: 6-byte-header frame on the probe's UART RX. No TX
+   * subscription exists on that path, so the ATT write acknowledgement is
+   * the confirmation. Node path: 10-byte-header frame carrying the locked
+   * probe's uint32 serial; the 0x05 response on UART TX confirms (4 s
+   * timeout → fail).
+   *
+   * @param {number} targetF - Pull temperature in °F
+   * @returns {Promise<boolean>} whether the write was dispatched
+   */
+  const sendTargetToProbe = useCallback(async (targetF) => {
+    const rx = rxCharRef.current;
+    if (!rx || targetF == null) { setTargetSync('fail'); return false; }
+
+    const predBytes = encodePredictionData(targetF);
+    let frame;
+    if (isNodeConnectionRef.current) {
+      const serial = lockedSerialBytesRef.current;
+      if (!serial || serial.length !== 4) {
+        // GGG relays use a 10-byte serial — the node Set Prediction command
+        // requires the uint32 form, so we can't address the probe through it.
+        setTargetSync('fail');
+        return false;
+      }
+      frame = buildNodeRequest(MSG_SET_PREDICTION, new Uint8Array([...serial, ...predBytes]));
+    } else {
+      frame = buildProbeRequest(MSG_SET_PREDICTION, new Uint8Array(predBytes));
+    }
+
+    try {
+      setTargetSync('sending');
+      clearTimeout(syncTimeoutRef.current);
+      await rx.writeValue(frame);
+      setLastSentTargetF(targetF);
+      if (isNodeConnectionRef.current) {
+        // Confirmed (or failed) by the 0x05 response in handleNotification
+        syncTimeoutRef.current = setTimeout(() => {
+          setTargetSync(prev => (prev === 'sending' ? 'fail' : prev));
+        }, 4000);
+      } else {
+        setTargetSync('ok');   // ATT write-with-response acked
+      }
+      return true;
+    } catch {
+      setTargetSync('fail');
+      return false;
+    }
+  }, []);
+
+  // Whether Set Prediction can reach the probe on the current connection
+  const canSendTarget = state === THERMOMETER_STATE.CONNECTED
+    && rxCharRef.current != null
+    && (!isNodeConnectionRef.current || lockedSerialBytesRef.current?.length === 4);
+
   const disconnect = useCallback(async () => {
     if (charRef.current) {
       try {
@@ -566,6 +719,8 @@ export default function useThermometer() {
     rxCharRef.current           = null;
     isNodeConnectionRef.current = false;
     lockedSerialRef.current     = null;
+    lockedSerialBytesRef.current = null;
+    clearTimeout(syncTimeoutRef.current);
     setState(THERMOMETER_STATE.IDLE);
     setSensors(null);
     setCoreTemp(null);
@@ -576,6 +731,8 @@ export default function useThermometer() {
     setGaugeAmbientTemp(null);
     setConnectedVia(null);
     setProbeSerial(null);
+    setTargetSync('idle');
+    setLastSentTargetF(null);
   }, [handleNotification, onDisconnect]);
 
   // Cleanup on unmount
@@ -597,6 +754,10 @@ export default function useThermometer() {
     gaugeAmbientTemp,     // number | null — GGG platinum RTD grill temperature (°F), null when direct probe
     connectedVia,         // 'probe' | 'node' | null — which BLE path was used
     probeSerial,          // string | null — hex serial of the relayed probe (node path only)
+    targetSync,           // 'idle' | 'sending' | 'ok' | 'fail' — Set Prediction write status
+    lastSentTargetF,      // number | null — last pull temp written to the probe (°F)
+    canSendTarget,        // boolean — Set Prediction reachable on this connection
+    sendTargetToProbe,    // (targetF) => Promise<boolean> — write pull temp as prediction set point
     deviceName,
     batteryOk,
     errorMsg,
