@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { getCategoryById, getItemById, getMethodById } from '../data/temperatures';
 import { estimateCarryover, formatTemp, getCookStatus, displayTemp, displayDeltaF, formatTempDisplay, displayThickness, fToC, cToF } from '../utils/carryover';
 import { estimateMicrowaveTime } from '../utils/microwaveTime';
+import { estimateTimeToPull } from '../utils/eta';
 import { alertsEnabled, setAlertsEnabled, enableAlerts, alert as fireAlert } from '../utils/alerts';
 import { THERMOMETER_STATE } from '../constants/thermometer';
 import useCookHistory from '../hooks/useCookHistory';
@@ -145,6 +146,15 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
 
   const status = getCookStatus(currentTemp, displayPullTemp, effectiveEndTemp);
   const shouldPull = currentTemp !== null && currentTemp >= displayPullTemp;
+
+  // ── Time-to-pull ETA ────────────────────────────────────────────────────
+  // Least-squares fit over the last ~5 min of the cook curve, extrapolated to
+  // the pull temp. Null when the data can't support it (stall, cooling, too
+  // few samples) — better no answer than a wrong one.
+  const etaToPull = useMemo(
+    () => estimateTimeToPull(cookHistory.history, currentTemp, displayPullTemp),
+    [cookHistory.history, currentTemp, displayPullTemp],
+  );
 
   // ── Alert triggers ──────────────────────────────────────────────────────
   // Each fires once per cook: a heads-up ~5°F out, then the pull alarm.
@@ -470,6 +480,25 @@ export default function CookScreen({ selection, thermo, navigate, goBack, SCREEN
               <span className="label" style={{ color: 'rgba(255,180,80,0.8)' }}>
                 Basting/flip method — lower pull accounts for continuous surface heat
               </span>
+            </div>
+          )}
+          {etaToPull != null && !shouldPull && (
+            <div className="carryover-row">
+              <span className="label">Est. time to pull</span>
+              <span className="val" style={{ color: category.accentColor, fontWeight: 700 }}>
+                ~{etaToPull.minutes} min
+                <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>
+                  {' '}· climbing {useCelsius
+                    ? `${Math.round(etaToPull.slopePerMin * 5 / 9 * 10) / 10}°C`
+                    : `${etaToPull.slopePerMin}°F`}/min
+                </span>
+              </span>
+            </div>
+          )}
+          {isConnected && thermo.predictedCoreTemp != null && (
+            <div className="carryover-row">
+              <span className="label">Probe estimated core 🌡</span>
+              <span className="val">{displayTemp(thermo.predictedCoreTemp, useCelsius)}</span>
             </div>
           )}
         </div>

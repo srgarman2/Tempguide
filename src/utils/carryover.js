@@ -609,7 +609,9 @@ export function estimateCarryover({
     const { lambda1: lam1_fd, A1: A1_fd } = biotLookup(Bi_fd, geometry);
     const timeConstantSec     = (Lc * Lc) / alpha;
     const fdPeakFraction      = methodId === 'basting-flip' ? 0.52 : 0.45;
-    const minutesToPeakEmpir  = Math.max(3, Math.min(120, (timeConstantSec / 60) * fdPeakFraction));
+    // Uncapped peak time for Fo — the 120-min cap is display-only (see the
+    // empirical path below for why capping here guts large-roast predictions).
+    const minutesToPeakEmpir  = Math.max(3, (timeConstantSec / 60) * fdPeakFraction);
     const Fo_empir            = (alpha * minutesToPeakEmpir * 60) / (Lc * Lc);
     const carryEigen_fd       = CARRYOVER_EIGENVALUES[geometry] ?? CARRYOVER_EIGENVALUES.slab;
     const thetaStar_fd        = carryEigen_fd.A1 * Math.exp(-carryEigen_fd.lambda1 * carryEigen_fd.lambda1 * Fo_empir);
@@ -706,12 +708,19 @@ export function estimateCarryover({
   // slightly higher fraction (0.52) to capture the delayed peak.
   const timeConstantSec = (Lc * Lc) / alpha;
   const peakFraction = methodId === 'basting-flip' ? 0.52 : 0.45;
-  // Cap at 120 min — large roasts (3"+) genuinely need 60-90 min to peak.
-  const minutesToPeak = Math.max(3, Math.min(120, (timeConstantSec / 60) * peakFraction));
+  // The 3-min floor boosts Fo for very thin cuts (they equilibrate almost
+  // fully); the 120-min cap applies to the DISPLAYED time only — see below.
+  const minutesToPeakUncapped = Math.max(3, (timeConstantSec / 60) * peakFraction);
+  const minutesToPeak = Math.min(120, minutesToPeakUncapped);
 
-  // Evaluate Fourier number at the moment of peak carryover — the physically
-  // meaningful instant, not the arbitrary end of rest.
-  const tPeakSec = minutesToPeak * 60;
+  // Evaluate the Fourier number at the physically meaningful moment of peak
+  // carryover — the UNCAPPED peak time. The conduction process is
+  // self-similar: at t = peakFraction·Lc²/α, Fo = peakFraction regardless of
+  // size, so fractionReached is size-independent per geometry. Using the
+  // capped display time here would make fractionReached collapse for large
+  // roasts (an 8" prime rib would predict ~2°F of carryover — backwards:
+  // bigger roasts store MORE energy and carry over more, not less).
+  const tPeakSec = minutesToPeakUncapped * 60;
   const Fo = (alpha * tPeakSec) / (Lc * Lc);
 
   // ── Surface-to-center gradient at pull ──────────────────────────────────
@@ -837,9 +846,11 @@ function generateCarryoverProfile({ pullTempF, peakTempF, minutesToPeak, restMin
   for (let minute = 0; minute <= profileEnd; minute++) {
     let tempF;
     if (minute <= minutesToPeak) {
-      // Rising phase: exponential approach to peak
+      // Rising phase: exponential approach, normalized so t=1 lands exactly
+      // on peakTempF — otherwise the curve jumps ~5% of ΔT where the cooling
+      // phase (which starts from the peak) takes over.
       const t = minute / minutesToPeak;
-      tempF = pullTempF + (peakTempF - pullTempF) * (1 - Math.exp(-3.0 * t));
+      tempF = pullTempF + (peakTempF - pullTempF) * ((1 - Math.exp(-3.0 * t)) / (1 - Math.exp(-3.0)));
     } else {
       // Cooling phase: Newton's law
       const tCool = (minute - minutesToPeak);
@@ -980,7 +991,10 @@ export function getCookStatus(currentTempF, pullTempF, endTempF, isResting = fal
   }
 
   const startTemp = 35; // Refrigerator temp assumption
-  const pct = Math.max(0, Math.min(100, ((currentTempF - startTemp) / (pullTempF - startTemp)) * 100));
+  const denom = pullTempF - startTemp;
+  const pct = denom > 0
+    ? Math.max(0, Math.min(100, ((currentTempF - startTemp) / denom) * 100))
+    : 100; // degenerate custom target at/below fridge temp — treat as done
 
   if (currentTempF >= pullTempF) return { phase: 'pull', label: 'Pull now!', pct: 100 };
   if (currentTempF >= pullTempF - 5) return { phase: 'soon', label: 'Almost there', pct };
